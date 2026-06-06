@@ -75,13 +75,24 @@ test.
 - Never weaken a gate or fixture to make a test pass — a correctly-held version failing a test means
   the test is wrong.
 
-## Phasing
+## Production requirements (M1)
 
-- **Phase 0:** packument rewrite + engine resolve + cache + pinned-but-held error path. This is the
-  MVP that "beats native cooldown on day one."
-- Later: surface richer reasons/links, per-requester telemetry feeding the engine.
+- **HA:** multi-replica behind a load balancer; readiness/liveness probes; graceful shutdown;
+  rolling deploys; Helm-deployable with resource limits.
+- **Security:** mTLS + scoped service identity to the engine; no privileged admin surface here.
+- **Observability:** OpenTelemetry spans for the resolve path (gateway → engine); Prometheus metrics
+  (rewrite latency, versions stripped, cache hit ratio, upstream errors); structured logs with
+  correlation IDs.
+- **SLO:** packument rewrite adds only a small bounded overhead; gateway availability ≥ 99.9%; a
+  pinned-but-held version always returns a clear Embargo error, never `ETARGET`.
 
-## Out of scope
+## Milestones
+
+- **M1:** packument rewrite + engine resolve + cache + pinned-but-held error path + HA + mTLS +
+  observability — a production firewall enforcing policy/cooldown.
+- **Later:** richer reasons/links, per-requester telemetry feeding the engine.
+
+## Non-goals
 
 - Policy/signal logic (engine only). Patching clients or fighting the resolver (forbidden — we work
   via packument rewriting). Adding uncached network calls to the rewrite path.

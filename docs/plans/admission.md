@@ -60,11 +60,19 @@ exact `package@version` lets the build pass (and is recorded). No ad-hoc bypass 
 - A changed dep that the engine HOLDs/DENYs fails the gate; a matching active exception passes it.
 - Advisory-flagged version fails regardless. Never weaken the gate to pass a test.
 
-## Phasing
+## Production requirements (M3)
 
-- **Phase 2:** GitHub Action + CLI, npm + pnpm lockfiles first, then yarn + bun.
-- Later: PR comment summarizing verdicts; org-level shared policy distribution; per-repo overlays.
+- **AuthN:** authenticates to the engine with a scoped service/CI identity (mTLS or signed token);
+  reads exceptions and verdicts under that identity, all audited engine-side.
+- **Observability:** structured logs + metrics (deps evaluated, blocked, exceptions applied);
+  emits a machine-readable report artifact in addition to human output.
+- **Self-dogfood:** once shipped, Embargo runs this gate in its own CI against its own lockfiles.
 
-## Out of scope
+## Milestones
+
+- **M3:** GitHub Action + CLI; all four lockfile formats; diff-aware evaluation; exception workflow.
+- **Later:** PR comment summarizing verdicts; org-level shared policy distribution; per-repo overlays.
+
+## Non-goals
 
 - Scoring/policy logic (engine + `/policy`). Acting as an SCA/CVE scanner (pair with Grype/Trivy).

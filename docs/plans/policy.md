@@ -10,13 +10,16 @@ A version-controlled, per-scope policy DSL. One central policy that repos inheri
 **most-specific-wins**. Encodes cooldown, provenance requirement, fast-track allow-list, and the
 on-hard-signal action.
 
-## Scope (Phase 0)
+## Scope (M1 — foundational)
 
-- A canonical **schema** for a policy rule + ruleset.
-- A **JSON Schema** (`policy.schema.json`) so every consumer (Rust engine, TS console/admission) can
-  validate the same way, regardless of language.
-- 1–2 **example policies** that mirror the console design's demo rules.
+- A canonical, **versioned** schema for a policy rule + ruleset (`version:` field; migrations as the
+  schema evolves so old policies keep validating or upgrade cleanly).
+- A **JSON Schema** (`policy.schema.json`) so every consumer (Rust engine, TS console/admission)
+  validates identically, regardless of language. It is the single contract.
+- Example policies that mirror the console design's demo rules.
 - A short **spec doc** for resolution semantics (specificity + matching).
+- Policy changes are authored/applied through the engine's RBAC'd admin API and **audited** (the file
+  format is the source of truth; edits via the console go through the same validation + audit path).
 
 ## Format
 

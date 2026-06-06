@@ -66,12 +66,22 @@ containment feed: `{ pkg, host, pipeline, repo, attempts, time, note? }`.
 - An allowlisted host is reachable; a non-allowlisted host is not.
 - (Phase 3) chain fixture fires the chain signal; benign secret-read-only does not.
 
-## Phasing
+## Production requirements
 
-- **Phase 2:** install runner + egress allowlist + `ReportEvent`.
-- **Phase 3:** eBPF chain detection.
+- **Isolation is the security boundary** — treat escape as the top threat (per `SECURITY.md`).
+  Defense in depth: namespaces + seccomp + egress allowlist (or microVM); least privilege; no host
+  mounts beyond what install needs.
+- **AuthN:** reports events to the engine under a scoped service identity (mTLS); events are audited.
+- **Observability:** metrics + structured logs for runs, blocks, and reported events; traces linked
+  to the triggering resolve/pipeline where possible.
+- **Deploy:** runs on an isolated node pool; Helm-deployable with strict resource + security context.
 
-## Out of scope
+## Milestones
+
+- **M3:** install runner + egress allowlist + `ReportEvent`.
+- **M4:** eBPF chain detection.
+
+## Non-goals
 
 - Being a runtime EDR. Scoring (engine owns weights/thresholds; sandbox only reports evidence).
 - Anything that would help evade the gate (forbidden).

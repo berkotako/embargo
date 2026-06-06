@@ -130,14 +130,32 @@ tied to `expires_at`.
   permanent.
 - Pure core has no I/O in tests; store/feeds tested separately (integration, behind a feature/flag).
 
-## Phasing
+## Production requirements (designed in from M1, not deferred)
 
-- **Phase 0:** types, policy resolution, cooldown, RPC (`Resolve`/`ResolvePackument`), store + cache,
-  audit. No signals. (Unblocks gateway + console MVP.)
-- **Phase 1:** signal detectors + chains + feeds (OSV/GHSA) + escalation + provenance verification.
-- **Phase 2:** ingest `ReportEvent` from sandbox as high-weight signals.
+- **AuthN/AuthZ:** every RPC/admin call carries an authenticated identity (mTLS service identity for
+  gateway/sandbox/admission; OIDC user identity for console) and is **RBAC-authorized server-side**
+  before execution. Model roles as role→permission so it extends past viewer/approver/admin. Every
+  privileged action writes an audit row.
+- **Observability:** OpenTelemetry tracing on the resolve path; Prometheus metrics (resolve p50/p95/
+  p99, cache hit ratio, verdict counts, **FP rate**, feed freshness, queue depth); structured JSON
+  logging with correlation IDs, no secrets/PII.
+- **Compliance:** `audit` is append-only and **hash-chained** (each row hashes the prior); supports
+  signed CSV/JSON export, retention policy, and access logging for every admin read/write.
+- **HA & data:** engine is **stateless and horizontally scalable** (probes + graceful shutdown);
+  Postgres primary+replica with failover + PITR; Redis Sentinel/cluster (cache is rebuildable, so
+  its loss degrades, never breaks). All migrations versioned and **reversible**.
+- **SLO:** resolve hot-path p99 ≤ 50 ms on cache hit (see `docs/PROJECT_PLAN.md`).
 
-## Out of scope (now)
+## Milestones
 
-- eBPF / runtime detection (that's `/sandbox`, Phase 3 — it only *feeds* the engine events).
-- Multi-tenancy. ML scoring (weights are tuned heuristics on real traffic).
+- **M1 (core):** types, policy resolution, cooldown, provenance gate, RPC
+  (`Resolve`/`ResolvePackument`), store + cache, hash-chained audit, RBAC'd admin API, OTel/metrics,
+  HA. No signals yet.
+- **M2 (signals):** signal detectors + chains + feeds (OSV/GHSA) + escalation + npm OIDC provenance
+  verification, each with benign+malicious fixtures and red-team evasion tests.
+- **M3:** ingest `ReportEvent` from sandbox as high-weight signals.
+
+## Non-goals
+
+- eBPF / runtime detection lives in `/sandbox` (M4) — the engine only *ingests* its events.
+- Multi-tenancy (single-org by decision). ML scoring (weights are tuned heuristics on real traffic).

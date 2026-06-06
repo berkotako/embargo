@@ -248,13 +248,18 @@ Each screen is a near-direct port; the interaction details below are the parts t
   breadcrumb, env pill `prod-registry`, ⌘K search field, RoleSwitch with avatar).
 - **Routing:** keep simple hash routing (`#dashboard` … `#audit`) + `useStored("embargo.route")`,
   syncing `document.title`. No router library needed. Default route = `quarantine` (the hero).
-- **Role / density / data-state:** in the prototype these come from the design tool's Tweaks panel.
-  Replace with an in-app **DemoControls** panel (small floating panel or a topbar menu) exposing:
-  Role (viewer/approver/admin, default **admin**), Density (comfortable/compact), Data state
-  (populated/loading/empty). The topbar RoleSwitch and DemoControls must stay in sync (single source
-  of truth in `App` state, persisted via `useStored`). **Do not port `tweaks-panel.jsx` verbatim** —
-  it speaks a postMessage protocol to the design host that doesn't exist here; reimplement just the
-  three controls with the same defaults.
+- **Auth & role (production):** the console authenticates via **OIDC SSO** and the logged-in user's
+  **role comes from the server** (engine admin API), enforced **server-side by RBAC** — the UI only
+  *reflects* permissions (hides/disables actions); it never grants them. The prototype's role
+  switcher becomes the real session identity + role. A **dev-only demo role switcher** (and the
+  density / data-state toggles) may remain behind an explicit dev flag for local work and design
+  parity, but must be unavailable in production builds. Do **not** rely on client-side role checks
+  for security — every privileged call is authorized by the engine.
+- **Density / data-state:** keep as a small in-app controls panel (dev/demo affordance). Replace the
+  prototype's `tweaks-panel.jsx` (it speaks a postMessage protocol to the design host that doesn't
+  exist here) — reimplement just the controls. Single source of truth in `App` state via `useStored`.
+- **Observability:** wire frontend telemetry (page/route + error reporting) consistent with the
+  platform's OTel setup; surface request correlation IDs from the API for support.
 - **Route-entry loading:** brief (~180–420ms) loading state on route change when data-state is
   `populated`, so skeletons are visible — mirror the prototype's `entering` behavior (and let the
   api-layer latency drive it).
@@ -292,9 +297,18 @@ Each screen is a near-direct port; the interaction details below are the parts t
 - [ ] Density toggle reflows row heights/padding; data-state simulator shows loading/empty.
 - [ ] Audit CSV actually downloads.
 
-## 11. Out of scope (this pass)
+## 11. Sequencing notes
 
-- Real backend / engine / gateway integration (only the `api.ts` seam is stubbed for it).
-- Auth / SSO / real RBAC (role switcher is a demo control).
-- Persistence of actions across reload beyond what `useStored` covers (actions are optimistic/local).
-- Docker/Helm packaging of the console.
+The UI build (this plan) and the backend integration proceed together toward production — this is
+not a throwaway pass:
+
+- **Now (UI build):** all six screens against the typed `data/api.ts` stub seam, so the UI is
+  complete and reviewable before the engine admin API lands.
+- **Then (integration, M1→M2):** swap `data/api.ts` stubs for the real engine admin API; add **OIDC
+  SSO** login and server-driven **RBAC** (replacing the demo role switcher); wire compliance
+  audit/export to the real hash-chained log; add frontend observability.
+- **Production packaging:** the console ships as a container in the Helm chart alongside engine +
+  gateway (see `docs/PROJECT_PLAN.md` → Deployment & HA).
+
+**Out of this build's scope (by decision):** multi-tenancy (single-org). Everything else —
+auth, RBAC, observability, compliance surface — is in scope, just sequenced after the UI shell.

@@ -122,16 +122,30 @@ The attacks land in CI/CD, not laptops — so this is half the value, not polish
 - **Gateway:** Verdaccio + middleware plugin (Node/TS), engine over local RPC.
 - **State:** Postgres (policy/verdicts/audit) + Redis (verdict cache).
 - **Console:** React + TS.
-- **Distribution:** Docker Compose (MVP) → Helm (later).
+- **Distribution:** Kubernetes + Helm (primary, production); Docker Compose for local dev.
+- **HA:** stateless engine/gateway behind LBs; Postgres primary+replica with failover + PITR; Redis
+  Sentinel/cluster. **Security:** mTLS between components, OIDC SSO + server-side RBAC. **Telemetry:**
+  OpenTelemetry tracing + Prometheus metrics + structured logging.
 
-## Roadmap (phases)
+## Roadmap (production milestones)
 
-- **Phase 0 — MVP:** packument rewriting + per-scope cooldown + fast-track list + minimal console
-  (queue + approve/deny). Beats native cooldown on day one.
-- **Phase 1 — Differentiator:** signal gating (start: new lifecycle script, binding.gyp,
-  provenance, advisory match), HOLD→DENY escalation, full console, provenance enforcement.
-- **Phase 2 — Enforcement + containment:** L2 admission gate, L3 sandboxed install.
-- **Phase 3 — Depth:** eBPF chain detection, RBAC + OIDC SSO, Helm.
+Built as a real, production-grade, single-org self-hosted system — not an MVP. The production
+pillars (**OIDC SSO + RBAC**, **observability**, **compliance/tamper-evident audit**, **self
+supply-chain security**) and **HA** (Kubernetes/Helm, Postgres/Redis failover) are present from
+**M1**, not deferred. See `docs/PROJECT_PLAN.md` for the full build plan and `docs/plans/` for
+per-component detail.
+
+- **M1 — Foundation + production firewall:** packument rewriting + per-scope cooldown + fast-track +
+  provenance gate; engine core (resolution, store + cache, gRPC + RBAC'd admin API, hash-chained
+  audit); console with SSO login + RBAC'd queue/approvals; HA + observability + CI/CD + Helm baseline.
+- **M2 — Signal engine + full console:** signal gating (new lifecycle script, binding.gyp,
+  provenance, advisory match) + composite chains, HOLD→DENY escalation, npm OIDC provenance
+  verification, external feeds; all six console screens + compliance audit/export surface.
+- **M3 — Enforcement + containment:** L2 admission gate, L3 sandboxed install with egress allowlist.
+- **M4 — Runtime depth + scale:** eBPF chain detection, autoscaling/perf hardening to SLO, DR drills,
+  advanced compliance reporting.
+
+Multi-tenancy is explicitly **out of scope** (single-org by decision).
 
 ## Threat model (what L1–L3 cover)
 

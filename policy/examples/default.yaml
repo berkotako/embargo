@@ -1,0 +1,34 @@
+# Embargo default policy — balanced for most organizations.
+# Resolution: most-specific-wins. See policy/README.md for full semantics.
+version: 1
+rules:
+  # Internal scoped packages: allow immediately (trusted pipeline with provenance).
+  - scope: "@mycompany/*"
+    cooldown_hours: 0
+    require_provenance: true
+    on_hard_signal: deny
+    fast_track:
+      - "@mycompany/design-tokens"
+      - "@mycompany/feature-flags"
+    enabled: true
+
+  # Type-declaration packages: low-risk, short cooldown.
+  - scope: "@types/*"
+    cooldown_hours: 6
+    require_provenance: false
+    on_hard_signal: deny
+    enabled: true
+
+  # High-value ecosystem packages: longer cooldown + provenance required.
+  - scope: "express,axios,chalk,react,lodash"
+    cooldown_hours: 24
+    require_provenance: true
+    on_hard_signal: deny
+    enabled: true
+
+  # Default catch-all: 72-hour cooldown, deny on any hard signal.
+  - scope: "**"
+    cooldown_hours: 72
+    require_provenance: false
+    on_hard_signal: deny
+    enabled: true

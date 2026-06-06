@@ -1,0 +1,19 @@
+[package]
+name = "embargo-core"
+description = "Pure policy & verdict logic — no I/O, fully unit-testable."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+globset = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# nothing that touches I/O — keep core pure

@@ -1,0 +1,40 @@
+# Embargo strict policy — for high-security environments (fintech, healthcare, critical infra).
+# All packages require provenance; extended cooldowns; hold on any hard signal for review.
+version: 1
+rules:
+  # Absolute fast-track for known-safe internal build artifacts only.
+  - scope: "@mycompany/build-artifacts"
+    cooldown_hours: 0
+    require_provenance: true
+    on_hard_signal: deny
+    fast_track:
+      - "@mycompany/build-artifacts"
+    enabled: true
+
+  # Internal scoped packages: require provenance, but still brief cooldown for review window.
+  - scope: "@mycompany/*"
+    cooldown_hours: 2
+    require_provenance: true
+    on_hard_signal: deny
+    enabled: true
+
+  # Type declarations: provenance required; minimal cooldown.
+  - scope: "@types/*"
+    cooldown_hours: 12
+    require_provenance: true
+    on_hard_signal: deny
+    enabled: true
+
+  # High-value ecosystem packages: extended cooldown + provenance + hold-for-review on signals.
+  - scope: "express,axios,chalk,react,lodash,webpack,babel-loader,typescript"
+    cooldown_hours: 168
+    require_provenance: true
+    on_hard_signal: hold
+    enabled: true
+
+  # Default catch-all: one-week cooldown, provenance required, deny on hard signal.
+  - scope: "**"
+    cooldown_hours: 168
+    require_provenance: true
+    on_hard_signal: deny
+    enabled: true

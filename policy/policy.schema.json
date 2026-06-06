@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://embargo.dev/schema/policy/v1",
+  "title": "Embargo Policy Ruleset",
+  "description": "Per-scope policy ruleset consumed by the engine, admission gate, and console.",
+  "type": "object",
+  "required": ["version", "rules"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Bump with a migration when breaking changes are made."
+    },
+    "rules": {
+      "type": "array",
+      "description": "Ordered list of policy rules. Resolution is most-specific-wins, not first-match.",
+      "items": { "$ref": "#/$defs/Rule" },
+      "minItems": 1
+    }
+  },
+  "$defs": {
+    "Rule": {
+      "type": "object",
+      "required": ["scope", "cooldown_hours", "require_provenance", "on_hard_signal", "enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "type": "string",
+          "description": "Glob or comma-separated list of globs over package names. Specificity determines which rule wins when multiple match. Examples: '@mycompany/auth', '@mycompany/*', 'express,axios', '**'.",
+          "minLength": 1
+        },
+        "cooldown_hours": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Hold new versions until they are at least this many hours old. 0 = allow immediately (bypass cooldown). The cooldown window is when signals are evaluated; a version flagged during HOLD escalates to permanent DENY."
+        },
+        "require_provenance": {
+          "type": "boolean",
+          "description": "When true, deny versions without a verified SLSA/npm build-provenance attestation. Catches review-bypass and out-of-pipeline publishes."
+        },
+        "on_hard_signal": {
+          "type": "string",
+          "enum": ["deny", "hold"],
+          "description": "Action when a hard signal fires (advisory match, typosquat, republish anomaly). 'deny' = permanent DENY; 'hold' = HOLD for manual review. Production default: deny."
+        },
+        "fast_track": {
+          "type": "array",
+          "description": "Exact package names exempt from this rule's cooldown and provenance requirement. Use for trusted internal packages or emergency CVE fixes. Entries must be exact names, not globs.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Disabled rules are skipped during resolution. Use to stage rule changes without deleting them."
+        }
+      }
+    }
+  }
+}

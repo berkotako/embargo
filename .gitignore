@@ -1,0 +1,30 @@
+# Rust
+engine/target/
+engine/**/*.rs.bk
+
+# Node
+node_modules/
+gateway/node_modules/
+console/node_modules/
+gateway/dist/
+console/dist/
+
+# Env / secrets
+.env
+.env.*
+certs/
+!certs/.gitkeep
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+*.lcov
+coverage/

@@ -1,0 +1,220 @@
+syntax = "proto3";
+package embargo.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ---------------------------------------------------------------------------
+// Core verdict RPC — called by L1 gateway and L2 admission gate.
+// ---------------------------------------------------------------------------
+
+service EngineService {
+  // Resolve a single (package, version) → verdict. Used by admission gate.
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+
+  // Resolve all versions of a package and return filtered packument metadata.
+  // Used by L1 gateway hot path. Verdicts are cached in Redis.
+  rpc ResolvePackument(ResolvePackumentRequest) returns (ResolvePackumentResponse);
+
+  // Report a containment or signal event (L3 sandbox, external feeds).
+  rpc ReportEvent(ReportEventRequest) returns (ReportEventResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Admin API — RBAC-gated, all mutations audited.
+// ---------------------------------------------------------------------------
+
+service AdminService {
+  // Policy CRUD
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+  rpc UpsertPolicy(UpsertPolicyRequest) returns (UpsertPolicyResponse);
+  rpc DeletePolicy(DeletePolicyRequest) returns (DeletePolicyResponse);
+
+  // Verdict overrides / approvals
+  rpc CreateApproval(CreateApprovalRequest) returns (CreateApprovalResponse);
+  rpc RevokeApproval(RevokeApprovalRequest) returns (RevokeApprovalResponse);
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse);
+
+  // Quarantine / verdict inspection
+  rpc ListVerdicts(ListVerdictsRequest) returns (ListVerdictsResponse);
+  rpc GetVerdict(GetVerdictRequest) returns (GetVerdictResponse);
+
+  // Audit log export
+  rpc ListAuditEntries(ListAuditEntriesRequest) returns (ListAuditEntriesResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+enum Verdict {
+  VERDICT_UNSPECIFIED = 0;
+  ALLOW = 1;
+  HOLD = 2;
+  DENY = 3;
+}
+
+message VersionInfo {
+  string package = 1;
+  string version = 2;
+  google.protobuf.Timestamp published_at = 3;
+}
+
+message ResolveRequest {
+  VersionInfo version_info = 1;
+  // Caller identity for audit; validated server-side against mTLS cert.
+  string caller_service = 2;
+}
+
+message ResolveResponse {
+  Verdict verdict = 1;
+  repeated string reasons = 2;
+  repeated SignalProto signals = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message ResolvePackumentRequest {
+  string package = 1;
+  // All versions present in the upstream packument with their publish timestamps.
+  repeated VersionInfo versions = 2;
+  string caller_service = 3;
+}
+
+message ResolvePackumentResponse {
+  // Only versions with ALLOW verdict. HOLD/DENY are stripped.
+  repeated string allowed_versions = 1;
+  // Map of version → ResolveResponse for versions that were stripped.
+  map<string, ResolveResponse> stripped = 2;
+}
+
+message SignalProto {
+  string signal_type = 1;
+  string severity = 2;
+  uint32 weight = 3;
+  string evidence_json = 4;
+  google.protobuf.Timestamp detected_at = 5;
+}
+
+message ReportEventRequest {
+  string event_type = 1;  // "sandbox_egress_attempt" | "ebpf_chain" | "advisory_match" | ...
+  string package = 2;
+  string version = 3;
+  string evidence_json = 4;
+  uint32 weight = 5;
+  string reporter_service = 6;
+}
+
+message ReportEventResponse {
+  bool accepted = 1;
+  // New verdict after applying the signal (may differ from pre-event verdict).
+  Verdict new_verdict = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Admin messages (abbreviated for M1 — expanded in M2)
+// ---------------------------------------------------------------------------
+
+message PolicyRuleProto {
+  string scope = 1;
+  uint64 cooldown_hours = 2;
+  bool require_provenance = 3;
+  string on_hard_signal = 4;  // "deny" | "hold"
+  repeated string fast_track = 5;
+  bool enabled = 6;
+}
+
+message GetPolicyRequest {}
+message GetPolicyResponse {
+  uint32 version = 1;
+  repeated PolicyRuleProto rules = 2;
+  google.protobuf.Timestamp updated_at = 3;
+}
+
+message UpsertPolicyRequest {
+  uint32 schema_version = 1;
+  repeated PolicyRuleProto rules = 2;
+  string justification = 3;
+}
+message UpsertPolicyResponse { bool ok = 1; string audit_id = 2; }
+
+message DeletePolicyRequest { string scope = 1; }
+message DeletePolicyResponse { bool ok = 1; }
+
+message ApprovalProto {
+  string id = 1;
+  string package = 2;
+  string version = 3;
+  string requester_id = 4;
+  string approver_id = 5;
+  string justification = 6;
+  google.protobuf.Timestamp expires_at = 7;
+  string status = 8;  // "active" | "expired" | "revoked"
+}
+
+message CreateApprovalRequest {
+  string package = 1;
+  string version = 2;
+  string justification = 3;
+  uint64 ttl_hours = 4;
+}
+message CreateApprovalResponse { ApprovalProto approval = 1; }
+
+message RevokeApprovalRequest { string approval_id = 1; string reason = 2; }
+message RevokeApprovalResponse { bool ok = 1; }
+
+message ListApprovalsRequest {
+  string package_filter = 1;
+  string status_filter = 2;
+  uint32 page_size = 3;
+  string page_token = 4;
+}
+message ListApprovalsResponse {
+  repeated ApprovalProto approvals = 1;
+  string next_page_token = 2;
+}
+
+message VerdictProto {
+  string package = 1;
+  string version = 2;
+  Verdict verdict = 3;
+  repeated string reasons = 4;
+  repeated SignalProto signals = 5;
+  google.protobuf.Timestamp computed_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+}
+
+message ListVerdictsRequest {
+  Verdict verdict_filter = 1;
+  string package_filter = 2;
+  uint32 page_size = 3;
+  string page_token = 4;
+}
+message ListVerdictsResponse {
+  repeated VerdictProto verdicts = 1;
+  string next_page_token = 2;
+}
+
+message GetVerdictRequest { string package = 1; string version = 2; }
+message GetVerdictResponse { VerdictProto verdict = 1; }
+
+message AuditEntryProto {
+  string id = 1;
+  string actor_json = 2;
+  string action = 3;
+  string target_json = 4;
+  string before_json = 5;
+  string after_json = 6;
+  google.protobuf.Timestamp timestamp = 7;
+  string prev_hash = 8;
+}
+
+message ListAuditEntriesRequest {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+  string action_filter = 3;
+  uint32 page_size = 4;
+  string page_token = 5;
+}
+message ListAuditEntriesResponse {
+  repeated AuditEntryProto entries = 1;
+  string next_page_token = 2;
+}

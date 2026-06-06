@@ -4,6 +4,11 @@ Implementation plan for the **Embargo Console** — the web admin UI (`/console`
 layout). This is the handoff plan from the design-review session; the build itself is intended to
 be carried out in a follow-up (Sonnet) session. Read this top to bottom before starting.
 
+> Part of the wider build plan. See `docs/PROJECT_PLAN.md` for how the console fits with the engine,
+> gateway, policy, admission, and sandbox components, and `docs/plans/` for those sub-plans. The
+> console reads/writes the engine's admin API (`docs/plans/engine.md`); its `data/api.ts` stub seam
+> is the swap point for that integration.
+
 ## 0. Source of truth
 
 The design was delivered as a Claude Design handoff bundle. Its files are committed verbatim in

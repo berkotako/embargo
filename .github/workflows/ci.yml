@@ -34,6 +34,46 @@ jobs:
         working-directory: engine
         run: cargo test --all
 
+  engine-integration:
+    name: Engine integration (Postgres + Redis)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: embargo
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/embargo
+      EMBARGO_REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres,rustls --version ^0.8
+      - name: Run migrations
+        working-directory: engine
+        run: sqlx migrate run --source migrations
+      - name: Integration tests
+        working-directory: engine
+        run: cargo test -p embargo-engine -- --include-ignored
+
   gateway:
     name: Gateway (TS)
     runs-on: ubuntu-latest

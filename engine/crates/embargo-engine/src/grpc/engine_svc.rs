@@ -198,3 +198,198 @@ fn verdict_to_proto(v: embargo_core::types::VersionVerdict) -> ResolveResponse {
         expires_at,
     }
 }
+
+// ---------------------------------------------------------------------------
+// DB-backed integration tests. Exercise the full resolve path against a real
+// Postgres + Redis. Marked #[ignore] so the offline CI job skips them; a
+// dedicated services job runs them with `cargo test -- --include-ignored`.
+//
+// Requires: DATABASE_URL (migrated schema) + a reachable Redis
+// (EMBARGO_REDIS_URL, default redis://localhost:6379).
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod itests {
+    use super::*;
+    use crate::config::{
+        Config, DatabaseConfig, GrpcConfig, LogFormat, ObservabilityConfig, RedisConfig, TlsConfig,
+    };
+    use crate::generated::embargo::v1::Verdict as ProtoVerdict;
+    use embargo_core::policy::PolicyRuleset;
+    use embargo_core::types::{Severity, Signal, SignalType, Verdict, VersionVerdict};
+    use sqlx::postgres::PgPoolOptions;
+    use uuid::Uuid;
+
+    const POLICY_YAML: &str = r#"
+version: 1
+rules:
+  - scope: "**"
+    cooldown_hours: 72
+    require_provenance: false
+    on_hard_signal: deny
+    enabled: true
+"#;
+
+    async fn test_state() -> EngineState {
+        let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        let redis_url =
+            std::env::var("EMBARGO_REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".into());
+
+        let pool = PgPoolOptions::new()
+            .max_connections(4)
+            .connect(&db_url)
+            .await
+            .expect("connect postgres");
+
+        // Seed the active "**" policy (idempotent: identical content each time).
+        let ruleset = PolicyRuleset::from_yaml(POLICY_YAML).unwrap();
+        crate::db::policies::upsert(&pool, &ruleset, POLICY_YAML, Uuid::nil(), "itest")
+            .await
+            .expect("seed policy");
+
+        let redis = redis::Client::open(redis_url.clone())
+            .unwrap()
+            .get_multiplexed_async_connection()
+            .await
+            .expect("connect redis");
+
+        let config = Config {
+            database: DatabaseConfig {
+                url: db_url,
+                max_connections: 4,
+            },
+            redis: RedisConfig {
+                url: redis_url,
+                verdict_ttl_secs: 300,
+            },
+            grpc: GrpcConfig {
+                addr: "[::]:0".into(),
+            },
+            tls: TlsConfig {
+                cert_pem: String::new(),
+                key_pem: String::new(),
+                ca_pem: String::new(),
+            },
+            observability: ObservabilityConfig {
+                otlp_endpoint: None,
+                log_format: LogFormat::Pretty,
+                log_level: "info".into(),
+            },
+            metrics_addr: "[::]:0".into(),
+        };
+
+        EngineState::new(pool, redis, config)
+    }
+
+    fn ts_hours_ago(h: i64) -> Option<prost_types::Timestamp> {
+        let dt = Utc::now() - chrono::Duration::hours(h);
+        Some(prost_types::Timestamp {
+            seconds: dt.timestamp(),
+            nanos: 0,
+        })
+    }
+
+    fn unique(prefix: &str) -> String {
+        format!("itest-{prefix}-{}", Uuid::new_v4())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn recent_version_is_held_for_cooldown() {
+        let state = test_state().await;
+        let pkg = unique("hold");
+        let res = resolve_one(&state, &pkg, "1.0.0", ts_hours_ago(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            res.verdict,
+            ProtoVerdict::Hold as i32,
+            "recent version must HOLD"
+        );
+        assert!(
+            res.expires_at.is_some(),
+            "HOLD must carry a cooldown expiry"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn aged_version_is_allowed() {
+        let state = test_state().await;
+        let pkg = unique("allow");
+        let res = resolve_one(&state, &pkg, "1.0.0", ts_hours_ago(200))
+            .await
+            .unwrap();
+        assert_eq!(
+            res.verdict,
+            ProtoVerdict::Allow as i32,
+            "aged version must ALLOW"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn advisory_signal_escalates_to_deny() {
+        let state = test_state().await;
+        let pkg = unique("advisory");
+        let ver = "1.0.0";
+
+        // Pre-store the version with an advisory signal; resolve reads it back.
+        let seeded = VersionVerdict {
+            package: pkg.clone(),
+            version: ver.into(),
+            verdict: Verdict::Hold,
+            reasons: vec![],
+            signals: vec![Signal {
+                id: Uuid::new_v4(),
+                signal_type: SignalType::AdvisoryMatch,
+                severity: Severity::Critical,
+                weight: 100,
+                evidence: serde_json::json!({ "advisory_id": "GHSA-itest-0001" }),
+                detected_at: Utc::now(),
+            }],
+            provenance: None,
+            computed_at: Utc::now(),
+            expires_at: None,
+        };
+        crate::db::verdicts::upsert(&state.pool, &seeded)
+            .await
+            .unwrap();
+
+        // Even though the version is recent (would HOLD), the advisory forces DENY.
+        let res = resolve_one(&state, &pkg, ver, ts_hours_ago(1))
+            .await
+            .unwrap();
+        assert_eq!(res.verdict, ProtoVerdict::Deny as i32, "advisory must DENY");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn active_approval_overrides_hold() {
+        let state = test_state().await;
+        let pkg = unique("approval");
+        let ver = "1.0.0";
+
+        // A time-boxed approval for this exact version, granted before resolve.
+        crate::db::approvals::create(
+            &state.pool,
+            &pkg,
+            ver,
+            Uuid::nil(),
+            Uuid::nil(),
+            "itest exception",
+            24,
+        )
+        .await
+        .unwrap();
+
+        // Recent version would HOLD, but the active approval overrides to ALLOW.
+        let res = resolve_one(&state, &pkg, ver, ts_hours_ago(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            res.verdict,
+            ProtoVerdict::Allow as i32,
+            "approval must override to ALLOW"
+        );
+    }
+}

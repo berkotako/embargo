@@ -22,7 +22,9 @@ pub async fn upsert(pool: &PgPool, v: &VersionVerdict) -> Result<()> {
         v.verdict as i16,
         serde_json::to_value(&v.reasons)?,
         serde_json::to_value(&v.signals)?,
-        serde_json::to_value(&v.provenance)?,
+        // Store SQL NULL (not JSON `null`) when there is no provenance, so the
+        // read path can round-trip it back to Option::None.
+        v.provenance.as_ref().map(serde_json::to_value).transpose()?,
         v.computed_at,
         v.expires_at,
     )
@@ -52,7 +54,10 @@ pub async fn get(pool: &PgPool, package: &str, version: &str) -> Result<Option<V
         verdict: int_to_verdict(row.verdict)?,
         reasons: serde_json::from_value(row.reasons)?,
         signals: serde_json::from_value(row.signals)?,
-        provenance: row.provenance.map(serde_json::from_value).transpose()?,
+        provenance: match row.provenance {
+            None | Some(serde_json::Value::Null) => None,
+            Some(v) => Some(serde_json::from_value(v)?),
+        },
         computed_at: row.computed_at,
         expires_at: row.expires_at,
     }))
@@ -87,7 +92,10 @@ pub async fn list_by_verdict(
                 verdict: int_to_verdict(row.verdict)?,
                 reasons: serde_json::from_value(row.reasons)?,
                 signals: serde_json::from_value(row.signals)?,
-                provenance: row.provenance.map(serde_json::from_value).transpose()?,
+                provenance: match row.provenance {
+                    None | Some(serde_json::Value::Null) => None,
+                    Some(v) => Some(serde_json::from_value(v)?),
+                },
                 computed_at: row.computed_at,
                 expires_at: row.expires_at,
             })

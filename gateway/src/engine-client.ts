@@ -56,12 +56,15 @@ export class EngineClient {
         (err: grpc.ServiceError | null, res: ResolvePackumentProtoResponse) => {
           if (err) { reject(err); return; }
           const stripped = new Map<string, VersionVerdict>();
-          for (const [ver, vr] of Object.entries(res.stripped ?? {})) {
-            stripped.set(ver, {
+          const strippedMap = (res.stripped ?? {}) as Record<string, StrippedProto>;
+          for (const [ver, vr] of Object.entries(strippedMap)) {
+            const vv: VersionVerdict = {
               verdict: protoVerdictToStr(vr.verdict),
               reasons: vr.reasons ?? [],
-              expiresAt: vr.expiresAt ? fromTimestamp(vr.expiresAt) : undefined,
-            });
+            };
+            // exactOptionalPropertyTypes: only set expiresAt when present.
+            if (vr.expiresAt) vv.expiresAt = fromTimestamp(vr.expiresAt);
+            stripped.set(ver, vv);
           }
           resolve({ allowedVersions: res.allowedVersions ?? [], stripped });
         },
@@ -72,6 +75,17 @@ export class EngineClient {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- proto shape
 type ResolvePackumentProtoResponse = any;
+
+interface ProtoTimestamp {
+  seconds: string | number;
+  nanos: number;
+}
+
+interface StrippedProto {
+  verdict: string | number;
+  reasons?: string[];
+  expiresAt?: ProtoTimestamp;
+}
 
 function toTimestamp(d: Date): { seconds: number; nanos: number } {
   return { seconds: Math.floor(d.getTime() / 1000), nanos: 0 };

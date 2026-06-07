@@ -5,7 +5,6 @@
 import type {
   Approval,
   AuditEntry,
-  ContainmentEvent,
   DashboardStats,
   PolicyRule,
   VersionVerdict,

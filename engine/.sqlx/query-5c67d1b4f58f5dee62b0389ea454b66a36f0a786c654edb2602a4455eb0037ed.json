@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE policies SET active = false WHERE active = true",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "5c67d1b4f58f5dee62b0389ea454b66a36f0a786c654edb2602a4455eb0037ed"
+}

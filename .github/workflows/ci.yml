@@ -10,6 +10,10 @@ jobs:
   engine:
     name: Engine (Rust)
     runs-on: ubuntu-latest
+    # Build/clippy/test against the committed sqlx offline cache (engine/.sqlx),
+    # so CI needs no database. Regenerate with `cargo sqlx prepare` when queries change.
+    env:
+      SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

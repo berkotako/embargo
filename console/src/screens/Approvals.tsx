@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Approval, CurrentUser } from '../types/index.ts';
 import { getApprovals, revokeApproval } from '../data/api.ts';
-import { VerdictBadge } from '../components/VerdictBadge.tsx';
 import { EmptyState } from '../components/EmptyState.tsx';
 import { relativeTime, shortDate } from '../lib/format.ts';
 import { can } from '../lib/rbac.ts';

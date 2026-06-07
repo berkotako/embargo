@@ -30,7 +30,7 @@ export function ScreenAudit() {
   return (
     <div className="content-pad fade-in">
       <div className="tbl-meta">
-        <span>Hash-chained, tamper-evident. Each entry's SHA-256 chains to its predecessor.</span>
+        <span>Hash-chained, tamper-evident. Each entry&apos;s SHA-256 chains to its predecessor.</span>
       </div>
       {loading ? (
         <div className="skel skel-line" style={{ height: 20 }} />

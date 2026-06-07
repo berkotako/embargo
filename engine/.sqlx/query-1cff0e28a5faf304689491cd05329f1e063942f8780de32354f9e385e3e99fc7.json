@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT package, version, verdict, reasons, signals, provenance, computed_at, expires_at\n        FROM verdicts\n        WHERE verdict = $1\n        ORDER BY computed_at DESC\n        LIMIT $2 OFFSET $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "package",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "verdict",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "reasons",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "signals",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "provenance",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "computed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "1cff0e28a5faf304689491cd05329f1e063942f8780de32354f9e385e3e99fc7"
+}

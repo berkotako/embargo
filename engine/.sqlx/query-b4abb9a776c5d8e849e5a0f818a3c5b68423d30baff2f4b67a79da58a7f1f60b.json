@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO policies (id, schema_version, yaml_content, active, actor_id, justification, updated_at)\n        VALUES ($1, $2, $3, true, $4, $5, NOW())\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b4abb9a776c5d8e849e5a0f818a3c5b68423d30baff2f4b67a79da58a7f1f60b"
+}

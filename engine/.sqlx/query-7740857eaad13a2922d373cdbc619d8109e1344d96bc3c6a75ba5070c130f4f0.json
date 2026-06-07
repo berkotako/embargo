@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO verdicts (id, package, version, verdict, reasons, signals, provenance, computed_at, expires_at)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n        ON CONFLICT (package, version) DO UPDATE\n          SET verdict = EXCLUDED.verdict,\n              reasons = EXCLUDED.reasons,\n              signals = EXCLUDED.signals,\n              provenance = EXCLUDED.provenance,\n              computed_at = EXCLUDED.computed_at,\n              expires_at = EXCLUDED.expires_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int2",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7740857eaad13a2922d373cdbc619d8109e1344d96bc3c6a75ba5070c130f4f0"
+}

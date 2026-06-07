@@ -3,10 +3,12 @@ pub mod engine_svc;
 
 use anyhow::Result;
 use sqlx::PgPool;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 
 use crate::config::Config;
+use crate::registry::RegistryClient;
 
 /// Shared state injected into all gRPC service handlers.
 #[derive(Clone)]
@@ -14,14 +16,22 @@ pub struct EngineState {
     pub pool: PgPool,
     pub redis: redis::aio::MultiplexedConnection,
     pub config: Config,
+    /// Upstream registry client used by the background signal extractor.
+    pub registry: Arc<dyn RegistryClient>,
 }
 
 impl EngineState {
-    pub fn new(pool: PgPool, redis: redis::aio::MultiplexedConnection, config: Config) -> Self {
+    pub fn new(
+        pool: PgPool,
+        redis: redis::aio::MultiplexedConnection,
+        config: Config,
+        registry: Arc<dyn RegistryClient>,
+    ) -> Self {
         Self {
             pool,
             redis,
             config,
+            registry,
         }
     }
 }

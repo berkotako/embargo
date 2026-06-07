@@ -6,6 +6,7 @@ use crate::config::DatabaseConfig;
 pub mod approvals;
 pub mod audit;
 pub mod policies;
+pub mod signals;
 pub mod verdicts;
 
 pub async fn connect(cfg: &DatabaseConfig) -> Result<PgPool> {

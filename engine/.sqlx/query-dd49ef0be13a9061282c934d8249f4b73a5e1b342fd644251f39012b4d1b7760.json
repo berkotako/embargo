@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO signals (id, package, version, signal_type, severity, weight, evidence, detected_at)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dd49ef0be13a9061282c934d8249f4b73a5e1b342fd644251f39012b4d1b7760"
+}

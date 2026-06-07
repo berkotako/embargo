@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, signal_type, severity, weight, evidence, detected_at\n        FROM signals\n        WHERE package = $1 AND version = $2\n        ORDER BY detected_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "signal_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "severity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "weight",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "evidence",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "detected_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "bd911bf8873c46404768dac89f0e95696b862e27fe1e893bbee8b424d9b9baa4"
+}

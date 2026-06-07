@@ -9,6 +9,8 @@ pub struct Config {
     pub tls: TlsConfig,
     pub observability: ObservabilityConfig,
     pub metrics_addr: String,
+    /// Upstream npm registry the signal extractor fetches packuments/tarballs from.
+    pub upstream_registry: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -61,6 +63,7 @@ impl Config {
             .set_default("metrics_addr", "[::]:9090")?
             .set_default("observability.log_format", "json")?
             .set_default("observability.log_level", "info")?
+            .set_default("upstream_registry", "https://registry.npmjs.org")?
             .build()?;
         Ok(cfg.try_deserialize()?)
     }

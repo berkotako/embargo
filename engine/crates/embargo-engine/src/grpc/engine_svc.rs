@@ -3,11 +3,12 @@ use chrono::Utc;
 use embargo_core::{
     policy::PolicyResolver,
     scoring::{compute_verdict, ResolutionInput},
-    types::{HoldReason, Verdict},
+    types::{HoldReason, Severity, Signal, SignalType, Verdict},
 };
 use prost_types::Timestamp;
 use tonic::{Request, Response, Status};
 use tracing::instrument;
+use uuid::Uuid;
 
 use crate::{
     cache::VerdictCache,
@@ -86,8 +87,22 @@ impl EngineService for EngineServiceImpl {
         let r = req.into_inner();
         tracing::info!(pkg = %r.package, ver = %r.version, event = %r.event_type, weight = r.weight, "containment event received");
 
-        // Persist signal + re-evaluate verdict.
-        // For M1: log + invalidate cache so next resolve picks it up.
+        // Record the reported event as a signal, then invalidate the cached
+        // verdict so the next resolve re-evaluates and can escalate.
+        let evidence: serde_json::Value =
+            serde_json::from_str(&r.evidence_json).unwrap_or_else(|_| serde_json::json!({}));
+        let signal = Signal {
+            id: Uuid::new_v4(),
+            signal_type: event_type_to_signal(&r.event_type),
+            severity: Severity::High,
+            weight: r.weight,
+            evidence,
+            detected_at: Utc::now(),
+        };
+        db::signals::append(&self.state.pool, &r.package, &r.version, &signal)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
         let mut cache = VerdictCache::from_conn(
             self.state.redis.clone(),
             self.state.config.redis.verdict_ttl_secs,
@@ -97,9 +112,14 @@ impl EngineService for EngineServiceImpl {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        // Re-resolve so the caller learns the post-event verdict.
+        let updated = resolve_one(&self.state, &r.package, &r.version, None)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
         Ok(Response::new(ReportEventResponse {
             accepted: true,
-            new_verdict: crate::generated::embargo::v1::Verdict::Hold as i32,
+            new_verdict: updated.verdict,
         }))
     }
 }
@@ -139,10 +159,8 @@ async fn resolve_one(
         .and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32))
         .unwrap_or_else(|| Utc::now() - chrono::Duration::hours(rule.cooldown_hours as i64 + 1));
 
-    let signals = db::verdicts::get(&state.pool, package, version)
-        .await?
-        .map(|v| v.signals)
-        .unwrap_or_default();
+    // Signals are produced out-of-band by the extractor and stored per version.
+    let signals = db::signals::get_for_version(&state.pool, package, version).await?;
 
     let input = ResolutionInput {
         package,
@@ -176,7 +194,57 @@ async fn resolve_one(
     db::verdicts::upsert(&state.pool, &verdict).await?;
     cache.set(&verdict).await?;
 
+    // 5. If this version is newly HELD and we have not analyzed it yet, kick off
+    //    signal extraction in the background. This never blocks the hot path; the
+    //    findings land in the signals store and escalate on the next resolve.
+    if verdict.verdict == Verdict::Hold && signals.is_empty() {
+        spawn_extraction(state.clone(), package.to_string(), version.to_string());
+    }
+
     Ok(verdict_to_proto(verdict))
+}
+
+/// Spawn a detached background extraction. Errors are logged, never surfaced to
+/// the caller — the verdict already returned. Idempotent (replace-on-write).
+fn spawn_extraction(state: EngineState, package: String, version: String) {
+    tokio::spawn(async move {
+        match crate::extractor::extract_and_store(
+            state.registry.as_ref(),
+            &state.pool,
+            &package,
+            &version,
+        )
+        .await
+        {
+            Ok(signals) if !signals.is_empty() => {
+                // Drop the cached verdict so the next resolve re-evaluates with signals.
+                let mut cache = VerdictCache::from_conn(
+                    state.redis.clone(),
+                    state.config.redis.verdict_ttl_secs,
+                );
+                if let Err(e) = cache.invalidate(&package, &version).await {
+                    tracing::warn!(%package, %version, error = %e, "cache invalidate after extraction failed");
+                }
+                tracing::info!(%package, %version, count = signals.len(), "background extraction stored signals");
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(%package, %version, error = %e, "background signal extraction failed");
+            }
+        }
+    });
+}
+
+/// Map an L3/feed event type string to a signal type.
+fn event_type_to_signal(event_type: &str) -> SignalType {
+    match event_type {
+        "sandbox_egress_attempt" => SignalType::SandboxEgressAttempt,
+        "ebpf_chain" | "ebpf_compromise_chain" => SignalType::EbpfCompromiseChain,
+        "advisory_match" => SignalType::AdvisoryMatch,
+        other => SignalType::Other {
+            name: other.to_string(),
+        },
+    }
 }
 
 fn verdict_to_proto(v: embargo_core::types::VersionVerdict) -> ResolveResponse {
@@ -215,7 +283,7 @@ mod itests {
     };
     use crate::generated::embargo::v1::Verdict as ProtoVerdict;
     use embargo_core::policy::PolicyRuleset;
-    use embargo_core::types::{Severity, Signal, SignalType, Verdict, VersionVerdict};
+    use embargo_core::types::{Severity, Signal, SignalType};
     use sqlx::postgres::PgPoolOptions;
     use uuid::Uuid;
 
@@ -229,7 +297,9 @@ rules:
     enabled: true
 "#;
 
-    async fn test_state() -> EngineState {
+    async fn test_state_with(
+        registry: std::sync::Arc<dyn crate::registry::RegistryClient>,
+    ) -> EngineState {
         let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let redis_url =
             std::env::var("EMBARGO_REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".into());
@@ -275,9 +345,20 @@ rules:
                 log_level: "info".into(),
             },
             metrics_addr: "[::]:0".into(),
+            upstream_registry: "https://registry.npmjs.org".into(),
         };
 
-        EngineState::new(pool, redis, config)
+        EngineState::new(pool, redis, config, registry)
+    }
+
+    /// Default state: a registry that serves nothing. Tests that seed signals
+    /// directly don't rely on extraction; any background extraction no-ops.
+    async fn test_state() -> EngineState {
+        let registry = std::sync::Arc::new(crate::registry::MockRegistryClient {
+            packument: crate::registry::Packument::default(),
+            tarballs: std::collections::HashMap::new(),
+        });
+        test_state_with(registry).await
     }
 
     fn ts_hours_ago(h: i64) -> Option<prost_types::Timestamp> {
@@ -333,25 +414,16 @@ rules:
         let pkg = unique("advisory");
         let ver = "1.0.0";
 
-        // Pre-store the version with an advisory signal; resolve reads it back.
-        let seeded = VersionVerdict {
-            package: pkg.clone(),
-            version: ver.into(),
-            verdict: Verdict::Hold,
-            reasons: vec![],
-            signals: vec![Signal {
-                id: Uuid::new_v4(),
-                signal_type: SignalType::AdvisoryMatch,
-                severity: Severity::Critical,
-                weight: 100,
-                evidence: serde_json::json!({ "advisory_id": "GHSA-itest-0001" }),
-                detected_at: Utc::now(),
-            }],
-            provenance: None,
-            computed_at: Utc::now(),
-            expires_at: None,
+        // The extractor records an advisory match in the signals store.
+        let signal = Signal {
+            id: Uuid::new_v4(),
+            signal_type: SignalType::AdvisoryMatch,
+            severity: Severity::Critical,
+            weight: 100,
+            evidence: serde_json::json!({ "advisory_id": "GHSA-itest-0001" }),
+            detected_at: Utc::now(),
         };
-        crate::db::verdicts::upsert(&state.pool, &seeded)
+        crate::db::signals::replace_for_version(&state.pool, &pkg, ver, &[signal])
             .await
             .unwrap();
 
@@ -390,6 +462,41 @@ rules:
             res.verdict,
             ProtoVerdict::Allow as i32,
             "approval must override to ALLOW"
+        );
+    }
+
+    /// Full pipeline: extractor fetches the malicious tarball (vs its benign
+    /// predecessor), detects the stealer chain, stores the signals, and the
+    /// subsequent resolve escalates the cooldown HOLD to a permanent DENY.
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn extraction_then_resolve_denies_stealer() {
+        let registry = std::sync::Arc::new(crate::testutil::stealer_registry());
+        let state = test_state_with(registry).await;
+        let pkg = unique("stealer");
+        let ver = "1.1.0";
+
+        // Run the background extractor synchronously for the assertion.
+        let signals =
+            crate::extractor::extract_and_store(state.registry.as_ref(), &state.pool, &pkg, ver)
+                .await
+                .unwrap();
+        assert!(
+            signals.iter().any(
+                |s| matches!(&s.signal_type, SignalType::Other { name } if name == "stealer_chain")
+            ),
+            "extractor should record the stealer chain: {signals:?}"
+        );
+
+        // A recent version would normally HOLD on cooldown; the stored chain
+        // signal escalates it to DENY (on_hard_signal: deny).
+        let res = resolve_one(&state, &pkg, ver, ts_hours_ago(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            res.verdict,
+            ProtoVerdict::Deny as i32,
+            "stealer chain must escalate to DENY"
         );
     }
 }

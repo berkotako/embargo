@@ -38,6 +38,8 @@ pub enum HoldReason {
     Advisory { advisory_id: String },
     /// Manually denied by an operator.
     ManualDeny { approver: String, reason: String },
+    /// Overridden to ALLOW by a time-boxed, audited approval (exception workflow).
+    ApprovedException { approver: String, reason: String },
 }
 
 /// Severity of a signal finding.

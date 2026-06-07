@@ -3,10 +3,10 @@ use sqlx::PgPool;
 
 use crate::config::DatabaseConfig;
 
-pub mod verdicts;
-pub mod policies;
 pub mod approvals;
 pub mod audit;
+pub mod policies;
+pub mod verdicts;
 
 pub async fn connect(cfg: &DatabaseConfig) -> Result<PgPool> {
     let pool = sqlx::postgres::PgPoolOptions::new()

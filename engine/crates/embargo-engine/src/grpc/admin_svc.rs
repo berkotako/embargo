@@ -8,9 +8,9 @@ use crate::{
     generated::embargo::v1::{
         admin_service_server::AdminService, CreateApprovalRequest, CreateApprovalResponse,
         DeletePolicyRequest, DeletePolicyResponse, GetPolicyRequest, GetPolicyResponse,
-        ListApprovalsRequest, ListApprovalsResponse, ListAuditEntriesRequest,
-        ListAuditEntriesResponse, ListVerdictsRequest, ListVerdictsResponse, GetVerdictRequest,
-        GetVerdictResponse, RevokeApprovalRequest, RevokeApprovalResponse, UpsertPolicyRequest,
+        GetVerdictRequest, GetVerdictResponse, ListApprovalsRequest, ListApprovalsResponse,
+        ListAuditEntriesRequest, ListAuditEntriesResponse, ListVerdictsRequest,
+        ListVerdictsResponse, RevokeApprovalRequest, RevokeApprovalResponse, UpsertPolicyRequest,
         UpsertPolicyResponse,
     },
     grpc::EngineState,
@@ -41,16 +41,24 @@ impl AdminService for AdminServiceImpl {
         };
 
         use crate::generated::embargo::v1::PolicyRuleProto;
-        let rules: Vec<PolicyRuleProto> = rs.rules.iter().map(|r| PolicyRuleProto {
-            scope: r.scope.clone(),
-            cooldown_hours: r.cooldown_hours,
-            require_provenance: r.require_provenance,
-            on_hard_signal: format!("{:?}", r.on_hard_signal).to_lowercase(),
-            fast_track: r.fast_track.clone(),
-            enabled: r.enabled,
-        }).collect();
+        let rules: Vec<PolicyRuleProto> = rs
+            .rules
+            .iter()
+            .map(|r| PolicyRuleProto {
+                scope: r.scope.clone(),
+                cooldown_hours: r.cooldown_hours,
+                require_provenance: r.require_provenance,
+                on_hard_signal: format!("{:?}", r.on_hard_signal).to_lowercase(),
+                fast_track: r.fast_track.clone(),
+                enabled: r.enabled,
+            })
+            .collect();
 
-        Ok(Response::new(GetPolicyResponse { version: rs.version, rules, updated_at: None }))
+        Ok(Response::new(GetPolicyResponse {
+            version: rs.version,
+            rules,
+            updated_at: None,
+        }))
     }
 
     async fn upsert_policy(
@@ -58,18 +66,23 @@ impl AdminService for AdminServiceImpl {
         req: Request<UpsertPolicyRequest>,
     ) -> Result<Response<UpsertPolicyResponse>, Status> {
         let r = req.into_inner();
-        let yaml = proto_rules_to_yaml(&r)
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        let ruleset = PolicyRuleset::from_yaml(&yaml)
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let yaml = proto_rules_to_yaml(&r).map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let ruleset =
+            PolicyRuleset::from_yaml(&yaml).map_err(|e| Status::invalid_argument(e.to_string()))?;
 
         // TODO(M1): extract actor from mTLS peer identity.
         let actor = Actor::System;
         let actor_id = Uuid::nil();
 
-        let audit_id = db::policies::upsert(&self.state.pool, &ruleset, &yaml, actor_id, &r.justification)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let audit_id = db::policies::upsert(
+            &self.state.pool,
+            &ruleset,
+            &yaml,
+            actor_id,
+            &r.justification,
+        )
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
 
         db::audit::append(
             &self.state.pool,
@@ -82,7 +95,10 @@ impl AdminService for AdminServiceImpl {
         .await
         .map_err(|e| Status::internal(e.to_string()))?;
 
-        Ok(Response::new(UpsertPolicyResponse { ok: true, audit_id: audit_id.to_string() }))
+        Ok(Response::new(UpsertPolicyResponse {
+            ok: true,
+            audit_id: audit_id.to_string(),
+        }))
     }
 
     async fn delete_policy(
@@ -155,15 +171,18 @@ impl AdminService for AdminServiceImpl {
         &self,
         _req: Request<ListApprovalsRequest>,
     ) -> Result<Response<ListApprovalsResponse>, Status> {
-        Ok(Response::new(ListApprovalsResponse { approvals: vec![], next_page_token: String::new() }))
+        Ok(Response::new(ListApprovalsResponse {
+            approvals: vec![],
+            next_page_token: String::new(),
+        }))
     }
 
     async fn list_verdicts(
         &self,
         req: Request<ListVerdictsRequest>,
     ) -> Result<Response<ListVerdictsResponse>, Status> {
+        use crate::generated::embargo::v1::{Verdict as ProtoVerdict, VerdictProto};
         use embargo_core::types::Verdict;
-        use crate::generated::embargo::v1::{VerdictProto, Verdict as ProtoVerdict};
 
         let r = req.into_inner();
         let filter_verdict = match r.verdict_filter {
@@ -176,21 +195,27 @@ impl AdminService for AdminServiceImpl {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        let proto_verdicts: Vec<VerdictProto> = verdicts.iter().map(|v| VerdictProto {
-            package: v.package.clone(),
-            version: v.version.clone(),
-            verdict: match v.verdict {
-                Verdict::Allow => ProtoVerdict::Allow as i32,
-                Verdict::Hold => ProtoVerdict::Hold as i32,
-                Verdict::Deny => ProtoVerdict::Deny as i32,
-            },
-            reasons: v.reasons.iter().map(|r| format!("{:?}", r)).collect(),
-            signals: vec![],
-            computed_at: None,
-            expires_at: None,
-        }).collect();
+        let proto_verdicts: Vec<VerdictProto> = verdicts
+            .iter()
+            .map(|v| VerdictProto {
+                package: v.package.clone(),
+                version: v.version.clone(),
+                verdict: match v.verdict {
+                    Verdict::Allow => ProtoVerdict::Allow as i32,
+                    Verdict::Hold => ProtoVerdict::Hold as i32,
+                    Verdict::Deny => ProtoVerdict::Deny as i32,
+                },
+                reasons: v.reasons.iter().map(|r| format!("{:?}", r)).collect(),
+                signals: vec![],
+                computed_at: None,
+                expires_at: None,
+            })
+            .collect();
 
-        Ok(Response::new(ListVerdictsResponse { verdicts: proto_verdicts, next_page_token: String::new() }))
+        Ok(Response::new(ListVerdictsResponse {
+            verdicts: proto_verdicts,
+            next_page_token: String::new(),
+        }))
     }
 
     async fn get_verdict(
@@ -201,9 +226,11 @@ impl AdminService for AdminServiceImpl {
         let v = db::verdicts::get(&self.state.pool, &r.package, &r.version)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
-        let Some(v) = v else { return Err(Status::not_found("verdict not found")) };
+        let Some(v) = v else {
+            return Err(Status::not_found("verdict not found"));
+        };
+        use crate::generated::embargo::v1::{Verdict as ProtoVerdict, VerdictProto};
         use embargo_core::types::Verdict;
-        use crate::generated::embargo::v1::{VerdictProto, Verdict as ProtoVerdict};
         Ok(Response::new(GetVerdictResponse {
             verdict: Some(VerdictProto {
                 package: v.package,
@@ -225,20 +252,34 @@ impl AdminService for AdminServiceImpl {
         &self,
         _req: Request<ListAuditEntriesRequest>,
     ) -> Result<Response<ListAuditEntriesResponse>, Status> {
-        Ok(Response::new(ListAuditEntriesResponse { entries: vec![], next_page_token: String::new() }))
+        Ok(Response::new(ListAuditEntriesResponse {
+            entries: vec![],
+            next_page_token: String::new(),
+        }))
     }
 }
 
 fn proto_rules_to_yaml(req: &UpsertPolicyRequest) -> Result<String, serde_yaml::Error> {
     use embargo_core::policy::{OnHardSignal, PolicyRule};
-    let rules: Vec<PolicyRule> = req.rules.iter().map(|r| PolicyRule {
-        scope: r.scope.clone(),
-        cooldown_hours: r.cooldown_hours,
-        require_provenance: r.require_provenance,
-        on_hard_signal: if r.on_hard_signal == "hold" { OnHardSignal::Hold } else { OnHardSignal::Deny },
-        fast_track: r.fast_track.clone(),
-        enabled: r.enabled,
-    }).collect();
-    let ruleset = PolicyRuleset { version: req.schema_version, rules };
+    let rules: Vec<PolicyRule> = req
+        .rules
+        .iter()
+        .map(|r| PolicyRule {
+            scope: r.scope.clone(),
+            cooldown_hours: r.cooldown_hours,
+            require_provenance: r.require_provenance,
+            on_hard_signal: if r.on_hard_signal == "hold" {
+                OnHardSignal::Hold
+            } else {
+                OnHardSignal::Deny
+            },
+            fast_track: r.fast_track.clone(),
+            enabled: r.enabled,
+        })
+        .collect();
+    let ruleset = PolicyRuleset {
+        version: req.schema_version,
+        rules,
+    };
     serde_yaml::to_string(&ruleset)
 }

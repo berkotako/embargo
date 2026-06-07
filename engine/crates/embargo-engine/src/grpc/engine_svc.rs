@@ -3,7 +3,7 @@ use chrono::Utc;
 use embargo_core::{
     policy::PolicyResolver,
     scoring::{compute_verdict, ResolutionInput},
-    types::Verdict,
+    types::{HoldReason, Verdict},
 };
 use prost_types::Timestamp;
 use tonic::{Request, Response, Status};
@@ -37,7 +37,9 @@ impl EngineService for EngineServiceImpl {
         req: Request<ResolveRequest>,
     ) -> Result<Response<ResolveResponse>, Status> {
         let r = req.into_inner();
-        let vi = r.version_info.ok_or_else(|| Status::invalid_argument("missing version_info"))?;
+        let vi = r
+            .version_info
+            .ok_or_else(|| Status::invalid_argument("missing version_info"))?;
 
         tracing::Span::current().record("pkg", &vi.package);
         tracing::Span::current().record("ver", &vi.version);
@@ -46,7 +48,7 @@ impl EngineService for EngineServiceImpl {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        Ok(Response::new(verdict_to_proto(verdict)))
+        Ok(Response::new(verdict))
     }
 
     #[instrument(skip(self, req), fields(pkg = %req.get_ref().package))]
@@ -59,10 +61,9 @@ impl EngineService for EngineServiceImpl {
         let mut stripped = std::collections::HashMap::new();
 
         for vi in r.versions {
-            let verdict =
-                resolve_one(&self.state, &vi.package, &vi.version, vi.published_at.clone())
-                    .await
-                    .map_err(|e| Status::internal(e.to_string()))?;
+            let verdict = resolve_one(&self.state, &vi.package, &vi.version, vi.published_at)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
 
             if verdict.verdict == crate::generated::embargo::v1::Verdict::Allow as i32 {
                 allowed_versions.push(vi.version);
@@ -71,7 +72,10 @@ impl EngineService for EngineServiceImpl {
             }
         }
 
-        Ok(Response::new(ResolvePackumentResponse { allowed_versions, stripped }))
+        Ok(Response::new(ResolvePackumentResponse {
+            allowed_versions,
+            stripped,
+        }))
     }
 
     #[instrument(skip(self, req))]
@@ -84,10 +88,14 @@ impl EngineService for EngineServiceImpl {
 
         // Persist signal + re-evaluate verdict.
         // For M1: log + invalidate cache so next resolve picks it up.
-        let mut cache = VerdictCache::new(&self.state.config.redis)
+        let mut cache = VerdictCache::from_conn(
+            self.state.redis.clone(),
+            self.state.config.redis.verdict_ttl_secs,
+        );
+        cache
+            .invalidate(&r.package, &r.version)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
-        cache.invalidate(&r.package, &r.version).await.map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(ReportEventResponse {
             accepted: true,
@@ -103,10 +111,14 @@ async fn resolve_one(
     published_at: Option<prost_types::Timestamp>,
 ) -> Result<ResolveResponse> {
     // 1. Check Redis cache.
-    let mut cache = VerdictCache::new(&state.config.redis).await?;
+    let mut cache =
+        VerdictCache::from_conn(state.redis.clone(), state.config.redis.verdict_ttl_secs);
     if let Some(cached) = cache.get(package, version).await? {
         // Still valid if not expired.
-        let still_valid = cached.expires_at.map(|exp| exp > Utc::now()).unwrap_or(true);
+        let still_valid = cached
+            .expires_at
+            .map(|exp| exp > Utc::now())
+            .unwrap_or(true);
         if still_valid {
             return Ok(verdict_to_proto(cached));
         }
@@ -119,12 +131,12 @@ async fn resolve_one(
     let resolver = PolicyResolver::new(&ruleset)?;
 
     // 3. Compute verdict.
-    let rule = resolver.resolve(package).ok_or_else(|| anyhow::anyhow!("no policy rule matched {}", package))?;
+    let rule = resolver
+        .resolve(package)
+        .ok_or_else(|| anyhow::anyhow!("no policy rule matched {}", package))?;
     let fast_tracked = resolver.is_fast_tracked(package);
     let pub_at = published_at
-        .and_then(|ts| {
-            chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
-        })
+        .and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32))
         .unwrap_or_else(|| Utc::now() - chrono::Duration::hours(rule.cooldown_hours as i64 + 1));
 
     let signals = db::verdicts::get(&state.pool, package, version)
@@ -142,7 +154,23 @@ async fn resolve_one(
         fast_tracked,
         now: Utc::now(),
     };
-    let verdict = compute_verdict(&input);
+    let mut verdict = compute_verdict(&input);
+
+    // 3b. Exception workflow: an active, unexpired approval for this exact
+    // (package, version) overrides a HOLD/DENY to ALLOW. Approvals are
+    // human-granted, time-boxed, and audited (see admin_svc::create_approval).
+    if verdict.verdict != Verdict::Allow {
+        if let Some(approval) = db::approvals::get_active(&state.pool, package, version).await? {
+            verdict.verdict = Verdict::Allow;
+            verdict.reasons.push(HoldReason::ApprovedException {
+                approver: approval.approver_id.to_string(),
+                reason: format!("approved exception (expires {})", approval.expires_at),
+            });
+            // An approval-overridden ALLOW expires when the approval does, so the
+            // gate re-closes automatically once the exception lapses.
+            verdict.expires_at = Some(approval.expires_at);
+        }
+    }
 
     // 4. Persist + cache.
     db::verdicts::upsert(&state.pool, &verdict).await?;
@@ -163,5 +191,10 @@ fn verdict_to_proto(v: embargo_core::types::VersionVerdict) -> ResolveResponse {
         seconds: dt.timestamp(),
         nanos: dt.timestamp_subsec_nanos() as i32,
     });
-    ResolveResponse { verdict: verdict_int, reasons, signals: vec![], expires_at }
+    ResolveResponse {
+        verdict: verdict_int,
+        reasons,
+        signals: vec![],
+        expires_at,
+    }
 }

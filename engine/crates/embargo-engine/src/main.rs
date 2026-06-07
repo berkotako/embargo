@@ -1,6 +1,6 @@
+mod cache;
 mod config;
 mod db;
-mod cache;
 mod generated;
 mod grpc;
 mod observability;
@@ -12,7 +12,10 @@ use tracing::info;
 async fn main() -> Result<()> {
     let cfg = config::Config::load()?;
     observability::init(&cfg.observability)?;
-    info!(version = env!("CARGO_PKG_VERSION"), "embargo-engine starting");
+    info!(
+        version = env!("CARGO_PKG_VERSION"),
+        "embargo-engine starting"
+    );
 
     let pool = db::connect(&cfg.database).await?;
     db::migrate(&pool).await?;
@@ -23,9 +26,10 @@ async fn main() -> Result<()> {
     let engine = grpc::EngineState::new(pool, redis, cfg.clone());
     let grpc_server = grpc::serve(engine, &cfg).await?;
 
+    // Each arm is JoinHandle<Result<()>>; `??` unwraps the JoinError then the inner Result.
     tokio::select! {
-        res = grpc_server => { res?; }
-        res = metrics_server => { res?; }
+        res = grpc_server => { res??; }
+        res = metrics_server => { res??; }
     }
 
     Ok(())

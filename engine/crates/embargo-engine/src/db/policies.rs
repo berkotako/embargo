@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use embargo_core::policy::PolicyRuleset;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -30,9 +29,13 @@ pub async fn upsert(
     justification: &str,
 ) -> Result<Uuid> {
     let id = Uuid::new_v4();
+    // Deactivate the current policy and install the new one atomically.
+    let mut tx = pool.begin().await?;
+    sqlx::query!("UPDATE policies SET active = false WHERE active = true")
+        .execute(&mut *tx)
+        .await?;
     sqlx::query!(
         r#"
-        UPDATE policies SET active = false WHERE active = true;
         INSERT INTO policies (id, schema_version, yaml_content, active, actor_id, justification, updated_at)
         VALUES ($1, $2, $3, true, $4, $5, NOW())
         "#,
@@ -42,7 +45,8 @@ pub async fn upsert(
         actor_id,
         justification,
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(id)
 }

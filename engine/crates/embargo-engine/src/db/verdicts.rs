@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use embargo_core::types::{Verdict, VersionVerdict};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -32,11 +31,7 @@ pub async fn upsert(pool: &PgPool, v: &VersionVerdict) -> Result<()> {
     Ok(())
 }
 
-pub async fn get(
-    pool: &PgPool,
-    package: &str,
-    version: &str,
-) -> Result<Option<VersionVerdict>> {
+pub async fn get(pool: &PgPool, package: &str, version: &str) -> Result<Option<VersionVerdict>> {
     let row = sqlx::query!(
         r#"
         SELECT package, version, verdict, reasons, signals, provenance, computed_at, expires_at
@@ -57,7 +52,7 @@ pub async fn get(
         verdict: int_to_verdict(row.verdict)?,
         reasons: serde_json::from_value(row.reasons)?,
         signals: serde_json::from_value(row.signals)?,
-        provenance: serde_json::from_value(row.provenance)?,
+        provenance: row.provenance.map(serde_json::from_value).transpose()?,
         computed_at: row.computed_at,
         expires_at: row.expires_at,
     }))
@@ -92,7 +87,7 @@ pub async fn list_by_verdict(
                 verdict: int_to_verdict(row.verdict)?,
                 reasons: serde_json::from_value(row.reasons)?,
                 signals: serde_json::from_value(row.signals)?,
-                provenance: serde_json::from_value(row.provenance)?,
+                provenance: row.provenance.map(serde_json::from_value).transpose()?,
                 computed_at: row.computed_at,
                 expires_at: row.expires_at,
             })

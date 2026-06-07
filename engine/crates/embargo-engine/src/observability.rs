@@ -6,8 +6,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 use crate::config::{LogFormat, ObservabilityConfig};
 
 pub fn init(cfg: &ObservabilityConfig) -> Result<()> {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&cfg.log_level));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cfg.log_level));
 
     match cfg.log_format {
         LogFormat::Json => {
@@ -24,7 +24,14 @@ pub fn init(cfg: &ObservabilityConfig) -> Result<()> {
         }
     }
 
-    // TODO(M1): wire OTel OTLP exporter when cfg.otlp_endpoint is set.
+    // Full OTLP span export is wired in M2; for now surface the configured
+    // endpoint so operators can confirm what tracing will target.
+    match &cfg.otlp_endpoint {
+        Some(endpoint) => {
+            tracing::info!(%endpoint, "OTLP endpoint configured (exporter lands in M2)")
+        }
+        None => tracing::debug!("no OTLP endpoint configured; traces stay local"),
+    }
 
     Ok(())
 }
@@ -48,6 +55,8 @@ async fn metrics_handler() -> String {
     let encoder = TextEncoder::new();
     let metric_families = prometheus::gather();
     let mut buffer = Vec::new();
-    encoder.encode(&metric_families, &mut buffer).unwrap_or_default();
+    encoder
+        .encode(&metric_families, &mut buffer)
+        .unwrap_or_default();
     String::from_utf8_lossy(&buffer).to_string()
 }

@@ -12,23 +12,27 @@ pub struct Approval {
     pub approver_id: Uuid,
     pub justification: String,
     pub expires_at: DateTime<Utc>,
+    // `status` and `created_at` are part of the approvals API surface returned
+    // by the console's list view (admin_svc::list_approvals lands in M2);
+    // resolve only needs approver_id + expires_at.
+    #[allow(dead_code)]
     pub status: ApprovalStatus,
+    #[allow(dead_code)]
     pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApprovalStatus {
     Active,
+    // Constructed when list_approvals maps the `status` column (M2).
+    #[allow(dead_code)]
     Expired,
+    #[allow(dead_code)]
     Revoked,
 }
 
 /// Returns an active, unexpired approval for the exact (package, version) pair.
-pub async fn get_active(
-    pool: &PgPool,
-    package: &str,
-    version: &str,
-) -> Result<Option<Approval>> {
+pub async fn get_active(pool: &PgPool, package: &str, version: &str) -> Result<Option<Approval>> {
     let row = sqlx::query!(
         r#"
         SELECT id, package, version, requester_id, approver_id, justification, expires_at, status, created_at

@@ -1,12 +1,12 @@
-pub mod engine_svc;
 pub mod admin_svc;
+pub mod engine_svc;
 
 use anyhow::Result;
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 
-use crate::{cache::VerdictCache, config::Config};
+use crate::config::Config;
 
 /// Shared state injected into all gRPC service handlers.
 #[derive(Clone)]
@@ -18,7 +18,11 @@ pub struct EngineState {
 
 impl EngineState {
     pub fn new(pool: PgPool, redis: redis::aio::MultiplexedConnection, config: Config) -> Self {
-        Self { pool, redis, config }
+        Self {
+            pool,
+            redis,
+            config,
+        }
     }
 }
 

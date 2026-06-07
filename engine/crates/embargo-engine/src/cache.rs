@@ -11,9 +11,11 @@ pub struct VerdictCache {
 }
 
 impl VerdictCache {
-    pub async fn new(cfg: &RedisConfig) -> Result<Self> {
-        let conn = connect(cfg).await?;
-        Ok(Self { conn, ttl_secs: cfg.verdict_ttl_secs })
+    /// Wrap an already-established shared connection — used on the hot path so
+    /// resolve does not open a new Redis connection per request.
+    /// `MultiplexedConnection` is a cheap-to-clone handle to one shared socket.
+    pub fn from_conn(conn: MultiplexedConnection, ttl_secs: u64) -> Self {
+        Self { conn, ttl_secs }
     }
 
     pub async fn get(&mut self, package: &str, version: &str) -> Result<Option<VersionVerdict>> {
@@ -33,13 +35,13 @@ impl VerdictCache {
         } else {
             self.ttl_secs
         };
-        self.conn.set_ex(&key, bytes, ttl).await?;
+        self.conn.set_ex::<_, _, ()>(&key, bytes, ttl).await?;
         Ok(())
     }
 
     pub async fn invalidate(&mut self, package: &str, version: &str) -> Result<()> {
         let key = cache_key(package, version);
-        self.conn.del(&key).await?;
+        self.conn.del::<_, ()>(&key).await?;
         Ok(())
     }
 }

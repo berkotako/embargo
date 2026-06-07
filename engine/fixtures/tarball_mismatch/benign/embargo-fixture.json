@@ -1,0 +1,7 @@
+{
+  "_comment": "Provenance attests to the same repo declared in package.json, and verification passed — no mismatch.",
+  "provenance_repo": "https://github.com/acme/widget",
+  "provenance_verified": true,
+  "publisher": { "npm_user": "acme-ci", "maintainers": ["acme-ci", "alice"] },
+  "republish_burst": 0
+}

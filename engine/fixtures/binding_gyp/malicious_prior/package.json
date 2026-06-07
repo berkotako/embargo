@@ -1,0 +1,9 @@
+{
+  "name": "fast-parse",
+  "version": "2.9.0",
+  "description": "Fast JSON parser",
+  "main": "index.js",
+  "repository": "https://github.com/fastparse/fast-parse",
+  "scripts": {},
+  "dependencies": {}
+}

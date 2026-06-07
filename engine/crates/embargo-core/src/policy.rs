@@ -5,7 +5,10 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum PolicyError {
     #[error("invalid glob in scope '{scope}': {source}")]
-    InvalidGlob { scope: String, source: globset::Error },
+    InvalidGlob {
+        scope: String,
+        source: globset::Error,
+    },
     #[error("policy ruleset has no rules")]
     EmptyRuleset,
     #[error("unsupported policy schema version {0}; expected 1")]

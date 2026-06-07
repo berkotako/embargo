@@ -1,0 +1,14 @@
+{
+  "name": "color-format",
+  "version": "1.9.0",
+  "description": "Tiny ANSI color formatter",
+  "main": "index.js",
+  "repository": "https://github.com/colorfmt/color-format",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest"
+  },
+  "dependencies": {
+    "chalk": "^5.2.0"
+  }
+}

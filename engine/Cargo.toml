@@ -30,7 +30,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # gRPC / protobuf
-tonic = { version = "0.13", features = ["tls", "tls-roots"] }
+tonic = { version = "0.13", features = ["transport", "codegen", "prost", "tls-ring", "tls-native-roots"] }
 tonic-build = "0.13"
 prost = "0.13"
 prost-types = "0.13"

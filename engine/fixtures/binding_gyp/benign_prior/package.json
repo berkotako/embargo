@@ -1,0 +1,11 @@
+{
+  "name": "native-hash",
+  "version": "4.1.0",
+  "description": "Native hashing addon",
+  "main": "index.js",
+  "repository": "https://github.com/nativehash/native-hash",
+  "scripts": {
+    "install": "node-gyp rebuild"
+  },
+  "dependencies": {}
+}

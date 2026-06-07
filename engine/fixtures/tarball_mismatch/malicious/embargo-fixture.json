@@ -1,0 +1,7 @@
+{
+  "_comment": "Out-of-band metadata the loader supplies that isn't in package.json: the repo from the (unverifiable) provenance attestation and the verification result.",
+  "provenance_repo": "https://github.com/attacker/widget-fork",
+  "provenance_verified": false,
+  "publisher": { "npm_user": "acme-ci", "maintainers": ["acme-ci", "alice"] },
+  "republish_burst": 0
+}

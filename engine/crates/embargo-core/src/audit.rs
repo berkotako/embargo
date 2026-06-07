@@ -20,8 +20,14 @@ pub struct AuditEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Actor {
-    User { id: Uuid, email: String, role: String },
-    Service { name: String },
+    User {
+        id: Uuid,
+        email: String,
+        role: String,
+    },
+    Service {
+        name: String,
+    },
     System,
 }
 
@@ -49,25 +55,14 @@ pub enum AuditTarget {
 }
 
 impl AuditEntry {
-    /// Compute the SHA-256 hash of this entry's canonical content (excluding `prev_hash`).
-    pub fn content_hash(&self) -> String {
-        use std::collections::BTreeMap;
-        // Serialize everything except prev_hash in a deterministic order.
+    /// Canonical JSON of this entry's content, excluding `prev_hash`.
+    /// The engine I/O layer SHA-256-hashes this (with `sha2`) to build the
+    /// chain — core stays free of crypto deps and remains a pure data type.
+    pub fn canonical_content(&self) -> String {
         let mut map = serde_json::to_value(self).unwrap_or_default();
         if let Some(obj) = map.as_object_mut() {
             obj.remove("prev_hash");
         }
-        let canonical = serde_json::to_string(&map).unwrap_or_default();
-        let digest = sha256(canonical.as_bytes());
-        hex::encode(digest)
+        serde_json::to_string(&map).unwrap_or_default()
     }
-}
-
-/// Tiny SHA-256 helper so we don't pull a full crypto dep into core.
-/// Production code uses the `sha2` crate in the engine I/O layer.
-fn sha256(data: &[u8]) -> [u8; 32] {
-    // Stub: returns zeros in core; the engine crate wires the real implementation.
-    // This keeps the pure core free of heavy crypto dependencies.
-    let _ = data;
-    [0u8; 32]
 }

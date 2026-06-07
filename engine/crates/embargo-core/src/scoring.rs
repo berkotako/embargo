@@ -30,17 +30,16 @@ pub fn compute_verdict(input: &ResolutionInput<'_>) -> VersionVerdict {
         let age_hours = (input.now - input.published_at).num_hours().max(0) as u64;
         if age_hours < input.rule.cooldown_hours {
             let remaining = input.rule.cooldown_hours - age_hours;
-            reasons.push(HoldReason::Cooldown { remaining_hours: remaining });
+            reasons.push(HoldReason::Cooldown {
+                remaining_hours: remaining,
+            });
             verdict = Verdict::Hold;
         }
     }
 
     // --- Provenance check ---
     if check_provenance && input.rule.require_provenance {
-        let ok = input
-            .provenance
-            .map(|p| p.is_verified())
-            .unwrap_or(false);
+        let ok = input.provenance.map(|p| p.is_verified()).unwrap_or(false);
         if !ok {
             reasons.push(HoldReason::ProvenanceMissing);
             // Provenance failure is a DENY (not a HOLD) — attestation can't be retried by waiting.
@@ -49,7 +48,10 @@ pub fn compute_verdict(input: &ResolutionInput<'_>) -> VersionVerdict {
     }
 
     // --- Signal scoring ---
-    let has_advisory = input.signals.iter().any(|s| s.signal_type == SignalType::AdvisoryMatch);
+    let has_advisory = input
+        .signals
+        .iter()
+        .any(|s| s.signal_type == SignalType::AdvisoryMatch);
     if has_advisory {
         reasons.push(HoldReason::Advisory {
             advisory_id: extract_advisory_id(input.signals),
@@ -130,10 +132,13 @@ mod tests {
         policy::{OnHardSignal, PolicyRule},
         types::{Severity, SignalType},
     };
-    use chrono::TimeZone;
     use uuid::Uuid;
 
-    fn make_rule(cooldown_hours: u64, require_provenance: bool, on_hard_signal: OnHardSignal) -> PolicyRule {
+    fn make_rule(
+        cooldown_hours: u64,
+        require_provenance: bool,
+        on_hard_signal: OnHardSignal,
+    ) -> PolicyRule {
         PolicyRule {
             scope: "**".into(),
             cooldown_hours,

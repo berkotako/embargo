@@ -98,7 +98,9 @@ pub enum SignalType {
     /// eBPF chain: secret read → serialize → non-allowlisted egress.
     EbpfCompromiseChain,
     /// Catch-all for future signals not yet modelled.
-    Other { name: String },
+    Other {
+        name: String,
+    },
 }
 
 /// The computed verdict for a (package, version) pair, ready for caching and serving.

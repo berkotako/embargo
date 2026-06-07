@@ -1,0 +1,11 @@
+{
+  "name": "fast-parse",
+  "version": "3.0.1",
+  "description": "Fast JSON parser",
+  "main": "index.js",
+  "repository": "https://github.com/fastparse/fast-parse",
+  "scripts": {
+    "install": "node-gyp rebuild"
+  },
+  "dependencies": {}
+}

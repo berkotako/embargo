@@ -9,6 +9,7 @@ on:
     paths:
       - "site/**"
       - "assets/**"
+      - "docs/design/console-prototype/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -30,11 +31,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Assemble site (page + shared illustrations)
+      - name: Assemble site (page + shared illustrations + console demo)
         run: |
           mkdir -p _site/assets
           cp -r site/. _site/
           cp assets/*.png _site/assets/
+          # Interactive console demo (self-contained React prototype, mock data).
+          mkdir -p _site/demo
+          cp -r "docs/design/console-prototype/." _site/demo/
+          cp "_site/demo/Embargo Console.html" _site/demo/index.html
 
       - uses: actions/configure-pages@v5
         with:

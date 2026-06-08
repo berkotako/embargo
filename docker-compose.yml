@@ -1,82 +1,102 @@
+# Embargo — local stack. `docker compose up --build` brings up:
+#   postgres + redis + engine (self-seeds a default policy) + console.
+# The console runs in `dev` auth mode (role picker); the engine enforces RBAC.
+#
+# The L1 gateway (Verdaccio plugin) is not yet wired into compose — it needs a
+# Verdaccio `filter_metadata` adapter + client mTLS. See gateway/README.
+
 services:
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: embargo
-      POSTGRES_USER: embargo
-      POSTGRES_PASSWORD: embargo_dev
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U embargo"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  # Generate dev mTLS material for the engine's gRPC listener (idempotent).
+  certgen:
+    image: alpine:3.20
+    volumes:
+      - certs:/certs
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ ! -f /certs/engine.crt ]; then
+          apk add --no-cache openssl >/dev/null
+          openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+            -keyout /certs/engine.key -out /certs/engine.crt -subj "/CN=engine"
+          cp /certs/engine.crt /certs/ca.crt
+          echo "generated dev certs"
+        else
+          echo "certs already present"
+        fi
+
   engine:
     build:
       context: ./engine
-      dockerfile: Dockerfile
-    environment:
-      EMBARGO__DATABASE__URL: postgresql://embargo:embargo_dev@postgres:5432/embargo
-      EMBARGO__DATABASE__MAX_CONNECTIONS: "5"
-      EMBARGO__REDIS__URL: redis://redis:6379
-      EMBARGO__REDIS__VERDICT_TTL_SECS: "300"
-      EMBARGO__GRPC__ADDR: "[::]:50051"
-      EMBARGO__METRICS_ADDR: "[::]:9090"
-      EMBARGO__TLS__CERT_PEM: /certs/engine.crt
-      EMBARGO__TLS__KEY_PEM: /certs/engine.key
-      EMBARGO__TLS__CA_PEM: /certs/ca.crt
-      EMBARGO__OBSERVABILITY__LOG_FORMAT: pretty
-      EMBARGO__OBSERVABILITY__LOG_LEVEL: debug
-    ports:
-      - "50051:50051"
-      - "9090:9090"
-    volumes:
-      - ./certs:/certs:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-
-  gateway:
-    build:
-      context: ./gateway
-      dockerfile: Dockerfile
+      certgen:
+        condition: service_completed_successfully
     environment:
-      ENGINE_ADDR: engine:50051
-      CONSOLE_BASE_URL: http://localhost:4000
-      TLS_CA_PEM: /certs/ca.crt
-      TLS_CERT_PEM: /certs/gateway.crt
-      TLS_KEY_PEM: /certs/gateway.key
-    ports:
-      - "4873:4873"
+      EMBARGO__DATABASE__URL: postgresql://postgres:postgres@postgres:5432/embargo
+      EMBARGO__DATABASE__MAX_CONNECTIONS: "10"
+      EMBARGO__REDIS__URL: redis://redis:6379
+      EMBARGO__REDIS__VERDICT_TTL_SECS: "300"
+      # Bind IPv4 (compose networks are v4 by default).
+      EMBARGO__GRPC__ADDR: "0.0.0.0:50051"
+      EMBARGO__ADMIN_HTTP_ADDR: "0.0.0.0:8080"
+      EMBARGO__METRICS_ADDR: "0.0.0.0:9090"
+      EMBARGO__TLS__CERT_PEM: /certs/engine.crt
+      EMBARGO__TLS__KEY_PEM: /certs/engine.key
+      EMBARGO__TLS__CA_PEM: /certs/ca.crt
+      EMBARGO__OBSERVABILITY__LOG_FORMAT: pretty
+      EMBARGO__OBSERVABILITY__LOG_LEVEL: info
+      EMBARGO__BOOTSTRAP_POLICY_PATH: /policy/default.yaml
+      EMBARGO__AUTH__MODE: dev
     volumes:
-      - ./certs:/certs:ro
-    depends_on:
-      - engine
+      - certs:/certs:ro
+      - ./policy/examples/default.yaml:/policy/default.yaml:ro
+    ports:
+      - "8080:8080" # admin API
+      - "50051:50051" # gRPC
+      - "9090:9090" # metrics/health
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   console:
     build:
       context: ./console
-      dockerfile: Dockerfile
-    ports:
-      - "4000:4000"
+      args:
+        VITE_AUTH_MODE: dev
     depends_on:
       - engine
+    ports:
+      - "4000:4000"
 
 volumes:
   pg_data:
+  certs:

@@ -358,6 +358,7 @@ rules:
             admin_http_addr: "[::]:0".into(),
             upstream_registry: "https://registry.npmjs.org".into(),
             osv_endpoint: "https://api.osv.dev".into(),
+            bootstrap_policy_path: String::new(),
             auth: crate::config::AuthConfig::default(),
         };
 

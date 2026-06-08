@@ -15,6 +15,9 @@ pub struct Config {
     pub upstream_registry: String,
     /// OSV advisory database endpoint for advisory matching.
     pub osv_endpoint: String,
+    /// Optional YAML policy installed on first boot when no policy is active.
+    #[serde(default)]
+    pub bootstrap_policy_path: String,
     /// Admin facade authentication.
     #[serde(default)]
     pub auth: AuthConfig,

@@ -35,6 +35,30 @@ async fn main() -> Result<()> {
     let pool = db::connect(&cfg.database).await?;
     db::migrate(&pool).await?;
 
+    // First-boot convenience: if there's no active policy yet and a bootstrap
+    // file is configured, install it so resolve has something to enforce.
+    if !cfg.bootstrap_policy_path.is_empty() && db::policies::get_active(&pool).await?.is_none() {
+        match std::fs::read_to_string(&cfg.bootstrap_policy_path) {
+            Ok(yaml) => match embargo_core::policy::PolicyRuleset::from_yaml(&yaml) {
+                Ok(ruleset) => {
+                    db::policies::upsert(
+                        &pool,
+                        &ruleset,
+                        &yaml,
+                        uuid::Uuid::nil(),
+                        "bootstrap policy",
+                    )
+                    .await?;
+                    info!(path = %cfg.bootstrap_policy_path, "installed bootstrap policy");
+                }
+                Err(e) => tracing::warn!(error = %e, "bootstrap policy failed to parse; skipping"),
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, path = %cfg.bootstrap_policy_path, "bootstrap policy unreadable; skipping")
+            }
+        }
+    }
+
     let redis = cache::connect(&cfg.redis).await?;
     let metrics_server = observability::spawn_metrics_server(cfg.metrics_addr.clone());
 

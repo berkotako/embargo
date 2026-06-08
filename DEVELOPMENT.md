@@ -29,6 +29,34 @@ sudo apt-get install -y protobuf-compiler postgresql redis-server
 /docs        Design docs; ARCHITECTURE.md is authoritative
 ```
 
+## Quick start with Docker Compose
+
+The fastest way to a running stack — Postgres + Redis + engine + console:
+
+```bash
+docker compose up --build
+# console      → http://localhost:4000   (dev auth: pick a role at sign-in)
+# admin API    → http://localhost:8080/api
+# engine gRPC  → localhost:50051 (mTLS)  ·  metrics/health → :9090
+```
+
+What compose wires up:
+- **certgen** generates dev mTLS material into a shared volume (idempotent).
+- **engine** runs in `dev` auth mode and **self-seeds** `policy/examples/default.yaml`
+  on first boot (via `EMBARGO__BOOTSTRAP_POLICY_PATH`), so resolve has a policy to
+  enforce immediately. Health-gated startup, depends on db + redis + certgen.
+- **console** is built with `VITE_AUTH_MODE=dev` and proxies `/api` → engine.
+
+The console signs you in with a role picker (`viewer` / `responder` / `admin`)
+and the engine enforces RBAC on every call. For production, switch both to
+`oidc` (engine `EMBARGO__AUTH__MODE=oidc` + JWKS; console `VITE_AUTH_MODE=oidc`
++ `VITE_OIDC_*`).
+
+> The L1 gateway is not yet in compose — its Verdaccio plugin needs a
+> `filter_metadata` adapter + client mTLS (tracked follow-up).
+
+The rest of this doc covers running each component directly (no Docker).
+
 ## Engine
 
 A Cargo workspace. `embargo-core` is pure (no I/O, fully unit-tested);

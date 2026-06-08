@@ -1,13 +1,22 @@
-FROM rust:1.82-alpine AS builder
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig protobuf-dev
+# Build the engine offline against the committed sqlx cache.
+FROM rust:1.82-slim AS builder
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends protobuf-compiler \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
+ENV SQLX_OFFLINE=true
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY proto/ proto/
+COPY migrations/ migrations/
+COPY .sqlx/ .sqlx/
 RUN cargo build --release --bin embargo-engine
 
-FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+FROM debian:bookworm-slim
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /build/target/release/embargo-engine /usr/local/bin/
-EXPOSE 50051 9090
+# gRPC (mTLS), admin HTTP/JSON (console), metrics/health
+EXPOSE 50051 8080 9090
 ENTRYPOINT ["embargo-engine"]

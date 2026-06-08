@@ -15,6 +15,7 @@ admission/dist/
 # Env / secrets
 .env
 .env.*
+!.env.example
 certs/
 !certs/.gitkeep
 

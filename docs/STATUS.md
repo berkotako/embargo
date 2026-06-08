@@ -44,5 +44,7 @@ and is wired into CI (`.github/workflows/ci.yml`).
   against refreshed OSV data.
 - **eBPF:** an `aya` ring-buffer data source for the runtime chain detector
   (lower overhead than the seccomp source; needs kernel BTF + `CAP_BPF`).
-- **Packaging:** a verified `docker compose up` / Helm chart with cert-gen +
-  seed, and the gateway/console production images.
+- **Packaging:** the engine/gateway/console production images now publish to
+  GHCR via a tag-triggered release workflow, consumed by `compose.prod.yml`
+  (fail-closed gateway, pinned images, cert-gen + policy seed). A **Helm chart**
+  for Kubernetes remains the open packaging follow-up.

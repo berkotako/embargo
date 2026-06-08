@@ -8,7 +8,11 @@ import type {
   VersionVerdict,
 } from './types';
 
-const PROTO_PATH = path.resolve(__dirname, '../../engine/proto/embargo.proto');
+// The proto dir: a monorepo-relative default, overridable for containers via
+// EMBARGO_PROTO_DIR (the gateway image bundles the proto next to the plugin).
+const PROTO_DIR =
+  process.env.EMBARGO_PROTO_DIR ?? path.resolve(__dirname, '../../engine/proto');
+const PROTO_PATH = path.join(PROTO_DIR, 'embargo.proto');
 
 export class EngineClient {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- grpc dynamic service
@@ -21,7 +25,7 @@ export class EngineClient {
       enums: String,
       defaults: true,
       oneofs: true,
-      includeDirs: [path.resolve(__dirname, '../../engine/proto')],
+      includeDirs: [PROTO_DIR],
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- grpc dynamic type
     const proto = grpc.loadPackageDefinition(pkgDef) as any;

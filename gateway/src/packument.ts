@@ -1,7 +1,7 @@
-import type { EngineClient } from './engine-client';
 import type {
   HeldVersionError,
   Packument,
+  PackumentResolver,
   PackumentVersion,
   VersionInfo,
 } from './types';
@@ -15,7 +15,7 @@ import type {
  */
 export async function rewritePackument(
   packument: Packument,
-  engine: EngineClient,
+  engine: PackumentResolver,
   callerService: string,
   consoleBaseUrl: string,
 ): Promise<Packument> {

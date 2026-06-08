@@ -1,8 +1,10 @@
-import { EmbargoPlugin } from './plugin';
+import { EmbargoStorageFilter } from './plugin';
 
-export { EmbargoPlugin };
+export { EmbargoStorageFilter };
+export { rewritePackument, buildHeldError } from './packument';
 
-// Verdaccio plugin entry point — called by Verdaccio's plugin loader.
-export default function (config: unknown, options: unknown): EmbargoPlugin {
-  return new EmbargoPlugin(config, options);
+// Verdaccio plugin entry point — the loader calls the default export with the
+// plugin's config block and Verdaccio's options, expecting a plugin instance.
+export default function (config: unknown, options: unknown): EmbargoStorageFilter {
+  return new EmbargoStorageFilter(config, options);
 }

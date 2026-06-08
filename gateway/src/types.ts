@@ -53,6 +53,15 @@ export interface EmbargoPluginConfig {
   callerService: string;
 }
 
+/** The engine surface the packument rewrite depends on (mockable in tests). */
+export interface PackumentResolver {
+  resolvePackument(
+    pkg: string,
+    versions: VersionInfo[],
+    callerService: string,
+  ): Promise<PackumentResponse>;
+}
+
 export interface HeldVersionError {
   package: string;
   version: string;

@@ -1,0 +1,33 @@
+# Verdaccio config that loads the Embargo storage filter.
+# The filter strips HOLD/DENY versions from each packument via the engine.
+
+storage: /verdaccio/storage
+plugins: /verdaccio/plugins
+
+uplinks:
+  npmjs:
+    url: https://registry.npmjs.org/
+
+packages:
+  '@*/*':
+    access: $all
+    proxy: npmjs
+  '**':
+    access: $all
+    proxy: npmjs
+
+# Metadata filters run on every packument after it's fetched from the uplink.
+# Verdaccio resolves the name `embargo` to the plugin dir `verdaccio-embargo`.
+filters:
+  embargo:
+    engine-addr: engine:50051
+    console-url: http://localhost:4000
+    tls-cert: /certs/gateway.crt
+    tls-key: /certs/gateway.key
+    tls-ca: /certs/ca.crt
+    # Fail-open (serve unfiltered) by default; set true to refuse to serve when
+    # the engine is unreachable — the gate stays shut.
+    fail-closed: false
+
+log: { type: stdout, format: pretty, level: info }
+listen: 0.0.0.0:4873

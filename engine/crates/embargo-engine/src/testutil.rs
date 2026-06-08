@@ -2,6 +2,7 @@
 //! serves a benign→malicious version pair (the stealer-chain scenario).
 
 use crate::registry::{MockRegistryClient, Packument, PackumentVersion};
+use base64::Engine as _;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use std::collections::{BTreeMap, HashMap};
@@ -75,5 +76,71 @@ pub fn stealer_registry() -> MockRegistryClient {
             time,
         },
         tarballs,
+        attestation: None,
+    }
+}
+
+/// Build an npm attestations response wrapping a SLSA v1 provenance statement
+/// for `repo` / `workflow`.
+pub fn attestations_json(repo: &str, workflow: &str) -> serde_json::Value {
+    let statement = serde_json::json!({
+        "_type": "https://in-toto.io/Statement/v1",
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "subject": [{ "name": "pkg", "digest": { "sha512": "abc" } }],
+        "predicate": {
+            "buildDefinition": {
+                "externalParameters": { "workflow": { "repository": repo, "path": workflow } },
+                "resolvedDependencies": [{ "uri": format!("git+{repo}.git") }]
+            }
+        }
+    });
+    let payload =
+        base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&statement).unwrap());
+    serde_json::json!({
+        "attestations": [
+            { "predicateType": "https://slsa.dev/provenance/v1",
+              "bundle": { "dsseEnvelope": { "payload": payload } } }
+        ]
+    })
+}
+
+/// A registry serving a single benign version 1.0.0 from `github.com/acme/demo`,
+/// optionally with a matching provenance attestation.
+pub fn benign_registry(with_provenance: bool) -> MockRegistryClient {
+    let pkg = br#"{"name":"demo","version":"1.0.0","scripts":{"build":"tsc"},"repository":"https://github.com/acme/demo"}"#;
+    let tgz = make_tarball(&[("package.json", pkg)]);
+
+    let mut versions = BTreeMap::new();
+    versions.insert(
+        "1.0.0".to_string(),
+        PackumentVersion {
+            version: "1.0.0".into(),
+            tarball_url: "https://r/demo-1.0.0.tgz".into(),
+            repository: Some("https://github.com/acme/demo".into()),
+            npm_user: Some("alice".into()),
+            maintainers: vec!["alice".into()],
+        },
+    );
+    let mut time = BTreeMap::new();
+    time.insert("1.0.0".into(), "2024-01-01T00:00:00.000Z".into());
+
+    let mut tarballs = HashMap::new();
+    tarballs.insert("https://r/demo-1.0.0.tgz".to_string(), tgz);
+
+    let attestation = with_provenance.then(|| {
+        attestations_json(
+            "https://github.com/acme/demo",
+            ".github/workflows/release.yml",
+        )
+    });
+
+    MockRegistryClient {
+        packument: Packument {
+            name: "demo".into(),
+            versions,
+            time,
+        },
+        tarballs,
+        attestation,
     }
 }

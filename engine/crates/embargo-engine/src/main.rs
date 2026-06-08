@@ -5,6 +5,7 @@ mod extractor;
 mod generated;
 mod grpc;
 mod observability;
+mod provenance;
 mod registry;
 mod tarball;
 #[cfg(test)]

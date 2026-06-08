@@ -30,8 +30,10 @@ impl std::fmt::Display for Verdict {
 pub enum HoldReason {
     /// Version was published less than `cooldown_hours` ago.
     Cooldown { remaining_hours: u64 },
-    /// Provenance attestation absent or unverifiable.
+    /// Provenance attestation checked and found absent or unverifiable → DENY.
     ProvenanceMissing,
+    /// Provenance required but not yet checked → HOLD until the extractor runs.
+    ProvenancePending,
     /// A signal chain scored above the DENY threshold.
     SignalChain { chain_id: String, score: u32 },
     /// Direct advisory/CVE match — always DENY.

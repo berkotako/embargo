@@ -36,6 +36,10 @@ pub struct PackumentVersion {
 pub trait RegistryClient: Send + Sync {
     async fn packument(&self, package: &str) -> Result<Packument>;
     async fn tarball(&self, url: &str) -> Result<Vec<u8>>;
+    /// Fetch the npm provenance/publish attestations for a version, if any.
+    /// Returns None when the registry has no attestations (HTTP 404).
+    async fn attestations(&self, package: &str, version: &str)
+        -> Result<Option<serde_json::Value>>;
 }
 
 /// Real HTTP client against a configurable upstream (default registry.npmjs.org).
@@ -81,6 +85,26 @@ impl RegistryClient for HttpRegistryClient {
             .bytes()
             .await?;
         Ok(bytes.to_vec())
+    }
+
+    async fn attestations(
+        &self,
+        package: &str,
+        version: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        // npm exposes attestations at /-/npm/v1/attestations/{name}@{version}.
+        let url = format!(
+            "{}/-/npm/v1/attestations/{}@{}",
+            self.upstream.trim_end_matches('/'),
+            package,
+            version
+        );
+        let resp = self.http.get(&url).send().await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let body: serde_json::Value = resp.error_for_status()?.json().await?;
+        Ok(Some(body))
     }
 }
 
@@ -180,12 +204,15 @@ fn parse_iso(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         .map(|d| d.with_timezone(&chrono::Utc))
 }
 
-/// In-memory mock for tests — serves canned packuments and tarballs.
+/// In-memory mock for tests — serves canned packuments, tarballs, attestations.
 #[cfg(test)]
+#[derive(Default)]
 pub struct MockRegistryClient {
     pub packument: Packument,
     /// tarball_url → gz bytes
     pub tarballs: std::collections::HashMap<String, Vec<u8>>,
+    /// Canned attestations response served for every version (None = no provenance).
+    pub attestation: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -199,6 +226,13 @@ impl RegistryClient for MockRegistryClient {
             .get(url)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("mock: no tarball for {url}"))
+    }
+    async fn attestations(
+        &self,
+        _package: &str,
+        _version: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        Ok(self.attestation.clone())
     }
 }
 

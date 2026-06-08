@@ -6,6 +6,7 @@ use crate::config::DatabaseConfig;
 pub mod approvals;
 pub mod audit;
 pub mod policies;
+pub mod provenance;
 pub mod signals;
 pub mod verdicts;
 

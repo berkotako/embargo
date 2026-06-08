@@ -39,11 +39,20 @@ pub fn compute_verdict(input: &ResolutionInput<'_>) -> VersionVerdict {
 
     // --- Provenance check ---
     if check_provenance && input.rule.require_provenance {
-        let ok = input.provenance.map(|p| p.is_verified()).unwrap_or(false);
-        if !ok {
-            reasons.push(HoldReason::ProvenanceMissing);
-            // Provenance failure is a DENY (not a HOLD) — attestation can't be retried by waiting.
-            verdict = Verdict::Deny;
+        match input.provenance {
+            // Verified attestation → passes the gate.
+            Some(p) if p.is_verified() => {}
+            // Checked and absent/invalid → DENY; waiting won't produce an attestation.
+            Some(_) => {
+                reasons.push(HoldReason::ProvenanceMissing);
+                verdict = Verdict::Deny;
+            }
+            // Not yet checked → HOLD until the extractor records a verdict, so we
+            // never DENY a legitimately-attested package before looking.
+            None => {
+                reasons.push(HoldReason::ProvenancePending);
+                verdict = escalate(verdict, Verdict::Hold);
+            }
         }
     }
 
@@ -130,7 +139,7 @@ mod tests {
     use super::*;
     use crate::{
         policy::{OnHardSignal, PolicyRule},
-        types::{Severity, SignalType},
+        types::{Provenance, Severity, SignalType},
     };
     use uuid::Uuid;
 
@@ -254,7 +263,8 @@ mod tests {
     }
 
     #[test]
-    fn missing_provenance_denies_when_required() {
+    fn unchecked_provenance_holds_when_required() {
+        // Provenance required but not yet checked (None) → HOLD pending, not DENY.
         let rule = make_rule(0, true, OnHardSignal::Deny);
         let input = ResolutionInput {
             package: "@mycompany/auth",
@@ -267,8 +277,49 @@ mod tests {
             now: Utc::now(),
         };
         let v = compute_verdict(&input);
+        assert_eq!(v.verdict, Verdict::Hold);
+        assert!(matches!(v.reasons[0], HoldReason::ProvenancePending));
+    }
+
+    #[test]
+    fn checked_absent_provenance_denies_when_required() {
+        // Provenance checked and absent → DENY; waiting can't produce one.
+        let rule = make_rule(0, true, OnHardSignal::Deny);
+        let absent = Provenance::Absent;
+        let input = ResolutionInput {
+            package: "@mycompany/auth",
+            version: "1.0.0",
+            published_at: old_package(),
+            provenance: Some(&absent),
+            signals: &[],
+            rule: &rule,
+            fast_tracked: false,
+            now: Utc::now(),
+        };
+        let v = compute_verdict(&input);
         assert_eq!(v.verdict, Verdict::Deny);
         assert!(matches!(v.reasons[0], HoldReason::ProvenanceMissing));
+    }
+
+    #[test]
+    fn verified_provenance_passes_gate() {
+        let rule = make_rule(0, true, OnHardSignal::Deny);
+        let verified = Provenance::Verified {
+            workflow: "release.yml".into(),
+            repo: "github.com/acme/auth".into(),
+        };
+        let input = ResolutionInput {
+            package: "@mycompany/auth",
+            version: "1.0.0",
+            published_at: old_package(),
+            provenance: Some(&verified),
+            signals: &[],
+            rule: &rule,
+            fast_tracked: false,
+            now: Utc::now(),
+        };
+        let v = compute_verdict(&input);
+        assert_eq!(v.verdict, Verdict::Allow);
     }
 
     #[test]

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT status, source_repo, workflow, reason\n        FROM provenance\n        WHERE package = $1 AND version = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "source_repo",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "workflow",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "49f0a51ba89072993bb781f4dc3b35fad977585b57e6d259110e7252e43f69d6"
+}

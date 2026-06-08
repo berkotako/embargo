@@ -159,14 +159,15 @@ async fn resolve_one(
         .and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32))
         .unwrap_or_else(|| Utc::now() - chrono::Duration::hours(rule.cooldown_hours as i64 + 1));
 
-    // Signals are produced out-of-band by the extractor and stored per version.
+    // Signals and provenance are produced out-of-band by the extractor.
     let signals = db::signals::get_for_version(&state.pool, package, version).await?;
+    let provenance = db::provenance::get(&state.pool, package, version).await?;
 
     let input = ResolutionInput {
         package,
         version,
         published_at: pub_at,
-        provenance: None, // M2: fetch from attestation store
+        provenance: provenance.as_ref(),
         signals: &signals,
         rule,
         fast_tracked,
@@ -194,10 +195,11 @@ async fn resolve_one(
     db::verdicts::upsert(&state.pool, &verdict).await?;
     cache.set(&verdict).await?;
 
-    // 5. If this version is newly HELD and we have not analyzed it yet, kick off
-    //    signal extraction in the background. This never blocks the hot path; the
-    //    findings land in the signals store and escalate on the next resolve.
-    if verdict.verdict == Verdict::Hold && signals.is_empty() {
+    // 5. If this version is HELD and we have not analyzed it yet (no signals, or
+    //    provenance still unchecked), kick off extraction in the background. This
+    //    never blocks the hot path; the results land in the stores and escalate
+    //    or clear the HOLD on the next resolve.
+    if verdict.verdict == Verdict::Hold && (signals.is_empty() || provenance.is_none()) {
         spawn_extraction(state.clone(), package.to_string(), version.to_string());
     }
 
@@ -290,6 +292,11 @@ mod itests {
     const POLICY_YAML: &str = r#"
 version: 1
 rules:
+  - scope: "itest-prov-*"
+    cooldown_hours: 72
+    require_provenance: true
+    on_hard_signal: deny
+    enabled: true
   - scope: "**"
     cooldown_hours: 72
     require_provenance: false
@@ -354,10 +361,7 @@ rules:
     /// Default state: a registry that serves nothing. Tests that seed signals
     /// directly don't rely on extraction; any background extraction no-ops.
     async fn test_state() -> EngineState {
-        let registry = std::sync::Arc::new(crate::registry::MockRegistryClient {
-            packument: crate::registry::Packument::default(),
-            tarballs: std::collections::HashMap::new(),
-        });
+        let registry = std::sync::Arc::new(crate::registry::MockRegistryClient::default());
         test_state_with(registry).await
     }
 
@@ -497,6 +501,72 @@ rules:
             res.verdict,
             ProtoVerdict::Deny as i32,
             "stealer chain must escalate to DENY"
+        );
+    }
+
+    /// require_provenance gate: an unchecked version HOLDs pending the check;
+    /// once the extractor records an absent attestation, it DENYs. (Names under
+    /// `itest-prov-*` hit the require_provenance rule in POLICY_YAML.)
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn provenance_required_holds_then_denies_when_absent() {
+        let registry = std::sync::Arc::new(crate::testutil::benign_registry(false));
+        let state = test_state_with(registry).await;
+        let pkg = unique("prov");
+        let ver = "1.0.0";
+
+        // Aged (past cooldown) but provenance not yet checked → HOLD pending,
+        // never an immediate DENY.
+        let r1 = resolve_one(&state, &pkg, ver, ts_hours_ago(200))
+            .await
+            .unwrap();
+        assert_eq!(
+            r1.verdict,
+            ProtoVerdict::Hold as i32,
+            "unchecked provenance must HOLD pending"
+        );
+
+        // Extract: the mock serves no attestation → Provenance::Absent.
+        crate::extractor::extract_and_store(state.registry.as_ref(), &state.pool, &pkg, ver)
+            .await
+            .unwrap();
+        let mut cache = crate::cache::VerdictCache::from_conn(
+            state.redis.clone(),
+            state.config.redis.verdict_ttl_secs,
+        );
+        cache.invalidate(&pkg, ver).await.unwrap();
+
+        let r2 = resolve_one(&state, &pkg, ver, ts_hours_ago(200))
+            .await
+            .unwrap();
+        assert_eq!(
+            r2.verdict,
+            ProtoVerdict::Deny as i32,
+            "checked-absent provenance must DENY"
+        );
+    }
+
+    /// require_provenance gate: a version with a valid, matching attestation
+    /// passes the gate and (aged, no signals) resolves to ALLOW.
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn provenance_verified_allows() {
+        let registry = std::sync::Arc::new(crate::testutil::benign_registry(true));
+        let state = test_state_with(registry).await;
+        let pkg = unique("prov");
+        let ver = "1.0.0";
+
+        crate::extractor::extract_and_store(state.registry.as_ref(), &state.pool, &pkg, ver)
+            .await
+            .unwrap();
+
+        let r = resolve_one(&state, &pkg, ver, ts_hours_ago(200))
+            .await
+            .unwrap();
+        assert_eq!(
+            r.verdict,
+            ProtoVerdict::Allow as i32,
+            "verified provenance + aged version must ALLOW"
         );
     }
 }

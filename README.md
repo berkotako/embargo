@@ -1,5 +1,11 @@
 # Embargo
 
+<!-- Hero banner — generate with Claude Design, save to assets/hero.png, then uncomment:
+<p align="center">
+  <img src="assets/hero.png" alt="Embargo — a self-hosted dependency firewall for npm" width="100%">
+</p>
+-->
+
 **A self-hosted dependency firewall for npm.** Embargo sits in front of the npm registry and
 *refuses to serve* package versions until they pass age, provenance, and behavioral-risk checks.
 It's a firewall that blocks — not a scanner that warns after the fact.
@@ -57,11 +63,68 @@ Every version gets one of three verdicts:
 | [`console`](console/) | UI | Web admin — quarantine review, policy, approvals, audit, dashboard (OIDC + server-side RBAC) |
 | [`policy`](policy/) | — | Versioned policy schema (JSON Schema) + YAML DSL + examples |
 
-How the layers compose: a client points `registry=` at the **gateway**, which asks the **engine**
-for verdicts and strips disallowed versions from the metadata. The engine resolves cooldown +
-per-scope policy + provenance + behavioral signals + advisories, escalating HOLD→DENY permanently
-when a version is flagged mid-cooldown. The **admission** gate enforces the same policy in CI, the
-**sandbox** contains the install itself, and the **console** drives review and approvals.
+## Architecture
+
+One principle drives the design: **the engine is the brain; L1/L2/L3 are enforcement points that
+ask it for verdicts.** A client never talks to the engine directly — it points `registry=` at the
+gateway, which rewrites the package metadata before the resolver ever sees a disallowed version.
+
+<!-- Architecture diagram — generate with Claude Design, save to assets/architecture.png, then uncomment:
+<p align="center">
+  <img src="assets/architecture.png" alt="Embargo architecture overview" width="100%">
+</p>
+-->
+
+```mermaid
+flowchart TD
+    client["Client — npm · pnpm · yarn · bun<br/>(.npmrc → registry=embargo)"]
+    gw["L1 — Ingress Gateway (Verdaccio plugin)<br/>rewrites packument, applies verdicts"]
+    engine["Policy &amp; Signal Engine (Rust) — the core<br/>cooldown · provenance · signal scoring"]
+    store[("State store<br/>Postgres + Redis")]
+    feeds["External feeds<br/>OSV · advisories · provenance"]
+    l2["L2 — Admission gate<br/>CI: GitHub Action / CLI"]
+    l3["L3 — Sandbox runner<br/>namespaced, egress-controlled"]
+    console["Web Admin Console<br/>quarantine · policy · approvals · audit"]
+
+    client -->|"GET /{package}"| gw
+    gw -->|"mTLS gRPC: verdict?"| engine
+    engine --> store
+    engine --> feeds
+    l2 -->|"lockfile diff"| engine
+    l3 -->|"containment events"| engine
+    console -->|"admin API · OIDC + RBAC"| engine
+    console --> store
+```
+
+### Request lifecycle
+
+1. A client resolves a dependency and fetches the **packument** (`GET /{package}` — the `versions`
+   and `time` maps) from the gateway.
+2. The gateway asks the engine for a verdict per version over mutual-TLS gRPC. Verdicts are cached
+   in Redis — there are **no uncached network calls in this hot path** (resolve latency is
+   user-facing).
+3. The engine resolves **most-specific-wins per-scope policy**, applies **cooldown**, enforces
+   **provenance** where required, and scores **behavioral signals + OSV advisories**.
+4. The gateway strips every **HOLD** / **DENY** version from the maps and returns the filtered
+   packument — the resolver simply never picks a disallowed version. A version pinned in a lockfile
+   but now held degrades to a clear Embargo error (reason + approval link), never a cryptic
+   `ETARGET`.
+5. A version flagged by a signal *during* its cooldown HOLD escalates to **DENY permanently** — it
+   is never silently served when the timer expires. This escalation is the whole point.
+
+### Defense in depth
+
+Each layer is an independent enforcement point fed by the same engine, so a miss at one layer is
+caught at the next:
+
+| Layer | Catches | Mechanism |
+|---|---|---|
+| **L1** Gateway | smash-and-grab token-hijack releases, missing provenance, republish anomalies | resolution-time packument rewrite |
+| **L2** Admission | policy-violating versions reaching CI/CD (where most attacks land) | lockfile-diff gate that fails the build |
+| **L3** Sandbox | install-time phone-home, lifecycle-script backdoors, secret→egress chains | namespaced, egress-allowlisted install runner |
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the authoritative design, data model, tech stack, and
+the full threat model (which attack maps to which defense).
 
 ## Quick start
 

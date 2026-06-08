@@ -1,10 +1,8 @@
 # Embargo
 
-<!-- Hero banner — generate with Claude Design, save to assets/hero.png, then uncomment:
 <p align="center">
   <img src="assets/hero.png" alt="Embargo — a self-hosted dependency firewall for npm" width="100%">
 </p>
--->
 
 **A self-hosted dependency firewall for npm.** Embargo sits in front of the npm registry and
 *refuses to serve* package versions until they pass age, provenance, and behavioral-risk checks.
@@ -48,6 +46,10 @@ pnpm, Yarn, and Bun.
 
 Every version gets one of three verdicts:
 
+<p align="center">
+  <img src="assets/explainer.png" alt="The three Embargo verdicts: ALLOW, HOLD, DENY" width="100%">
+</p>
+
 - 🟢 **ALLOW** — served normally
 - 🟡 **HOLD** — withheld during cooldown / pending review
 - 🔴 **DENY** — blocked (flagged by a signal or advisory)
@@ -69,11 +71,9 @@ One principle drives the design: **the engine is the brain; L1/L2/L3 are enforce
 ask it for verdicts.** A client never talks to the engine directly — it points `registry=` at the
 gateway, which rewrites the package metadata before the resolver ever sees a disallowed version.
 
-<!-- Architecture diagram — generate with Claude Design, save to assets/architecture.png, then uncomment:
 <p align="center">
-  <img src="assets/architecture.png" alt="Embargo architecture overview" width="100%">
+  <img src="assets/architecture.png" alt="Embargo architecture overview" width="640">
 </p>
--->
 
 ```mermaid
 flowchart TD

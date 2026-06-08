@@ -1,12 +1,13 @@
 # README assets
 
-Generated imagery for the project README. Drop files here and uncomment the
-matching `<img>` block in [`../README.md`](../README.md).
+Generated imagery for the project README (built with Claude Design, matched to
+the console palette — slate `#0f172a`, emerald / amber / red, no baked-in text).
 
-| File | Used as | Suggested size |
+| File | Used as | Size |
 |---|---|---|
-| `hero.png` | Top-of-README hero banner | ~1600×500 (wide) |
-| `architecture.png` | Architecture-section diagram | ~1600×900 |
+| `hero.png` | Top-of-README hero banner | 1600×760 |
+| `architecture.png` | Architecture-section diagram | 1400×1000 |
+| `explainer.png` | Three-verdict cards in "How it works" | 1400×480 |
 
 ## Generating with Claude Design
 

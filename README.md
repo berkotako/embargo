@@ -146,7 +146,9 @@ See [`DEVELOPMENT.md`](DEVELOPMENT.md) for the full per-component setup, config,
 - [Status](docs/STATUS.md) — what's built and verified, with test counts
 - [Architecture](ARCHITECTURE.md) — authoritative design
 - [Signals](SIGNALS.md) — the detection catalog and scoring contract
+- [FAQ](docs/FAQ.md) — what it is, how to use it, how verdicts behave
 - [Development](DEVELOPMENT.md) — local setup, run commands, config, the admin API
+- [Deployment](DEPLOYMENT.md) — production topology, hardening, client onboarding
 - [Project plan](docs/PROJECT_PLAN.md) and [per-component plans](docs/plans/)
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 

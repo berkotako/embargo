@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Embargo — a dependency firewall for npm</title>
+<meta name="description" content="Self-hosted dependency firewall for npm. Refuses to serve package versions until they pass age, provenance, and behavioral-signal checks. A gate that blocks, not a scanner that warns.">
+<meta property="og:title" content="Embargo — a dependency firewall for npm">
+<meta property="og:description" content="A gate that blocks risky npm package versions at resolve time — not a scanner that warns after the fact.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/hero.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#11161f; --panel2:#0f1620; --border:#222a39;
+    --text:#e6eaf2; --dim:#9aa6ba; --faint:#5b6478;
+    --emerald:#34d399; --amber:#f59e0b; --red:#ef4444;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:"IBM Plex Sans",system-ui,sans-serif;line-height:1.6;
+    -webkit-font-smoothing:antialiased;}
+  a{color:inherit;}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px;}
+  code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;}
+
+  /* nav */
+  header.nav{position:sticky;top:0;z-index:10;backdrop-filter:blur(10px);
+    background:rgba(11,14,20,.78);border-bottom:1px solid var(--border);}
+  .nav .wrap{display:flex;align-items:center;gap:24px;height:60px;}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.3px;font-size:17px;}
+  .brand .dot{width:14px;height:14px;border-radius:4px;
+    background:linear-gradient(180deg,var(--emerald),#0f7a52);box-shadow:0 0 14px rgba(52,211,153,.6);}
+  .nav nav{display:flex;gap:22px;margin-left:auto;font-size:14px;color:var(--dim);}
+  .nav nav a{text-decoration:none;}
+  .nav nav a:hover{color:var(--text);}
+  .btn{display:inline-block;border-radius:9px;padding:10px 18px;font-weight:600;font-size:14px;
+    text-decoration:none;border:1px solid var(--border);transition:.15s;}
+  .btn.primary{background:var(--emerald);color:#06140d;border-color:transparent;}
+  .btn.primary:hover{filter:brightness(1.08);}
+  .btn.ghost:hover{border-color:var(--emerald);color:var(--emerald);}
+
+  /* hero */
+  .hero{padding:72px 0 40px;text-align:center;}
+  .pill{display:inline-block;font-size:12.5px;color:var(--emerald);border:1px solid #1f3a30;
+    background:#0e1c16;border-radius:999px;padding:5px 13px;margin-bottom:22px;}
+  .hero h1{font-size:clamp(34px,6vw,58px);line-height:1.05;letter-spacing:-1.4px;margin:0 0 18px;font-weight:700;}
+  .hero h1 .accent{color:var(--emerald);}
+  .hero p.lead{font-size:clamp(16px,2.4vw,20px);color:var(--dim);max-width:680px;margin:0 auto 30px;}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
+  .hero-img{margin:48px auto 0;max-width:1000px;border:1px solid var(--border);border-radius:16px;
+    overflow:hidden;box-shadow:0 30px 80px -30px rgba(0,0,0,.8);}
+  .hero-img img{display:block;width:100%;height:auto;}
+
+  /* sections */
+  section{padding:64px 0;border-top:1px solid var(--border);}
+  .eyebrow{color:var(--emerald);font-family:"IBM Plex Mono",monospace;font-size:12.5px;
+    letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;}
+  h2{font-size:clamp(26px,4vw,38px);letter-spacing:-.8px;margin:0 0 16px;font-weight:700;}
+  .muted{color:var(--dim);max-width:720px;}
+  .center{text-align:center;margin-left:auto;margin-right:auto;}
+
+  .figure{margin:34px auto 0;max-width:920px;border:1px solid var(--border);border-radius:14px;
+    overflow:hidden;background:#0f172a;}
+  .figure.narrow{max-width:560px;}
+  .figure img{display:block;width:100%;height:auto;}
+
+  /* verdict legend */
+  .legend{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:26px;}
+  .verdict{border:1px solid var(--border);border-radius:12px;padding:16px 20px;min-width:210px;background:var(--panel);}
+  .verdict .tag{font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px;}
+  .verdict .tag .sw{width:10px;height:10px;border-radius:50%;}
+  .verdict small{color:var(--dim);}
+
+  /* cards grid */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px;margin-top:34px;}
+  .card{border:1px solid var(--border);border-radius:14px;padding:22px;background:var(--panel);}
+  .card h3{margin:0 0 8px;font-size:17px;}
+  .card .layer{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--emerald);}
+  .card p{margin:6px 0 0;color:var(--dim);font-size:14.5px;}
+
+  /* code */
+  pre.code{background:var(--panel2);border:1px solid var(--border);border-radius:12px;
+    padding:20px 22px;overflow:auto;font-size:13.5px;line-height:1.7;margin-top:24px;}
+  pre.code .c{color:var(--faint);}
+  pre.code .g{color:var(--emerald);}
+
+  /* footer */
+  footer{border-top:1px solid var(--border);padding:40px 0;color:var(--faint);font-size:13.5px;}
+  footer .wrap{display:flex;gap:18px;flex-wrap:wrap;align-items:center;}
+  footer a{color:var(--dim);text-decoration:none;}
+  footer a:hover{color:var(--text);}
+  footer .sp{margin-left:auto;}
+  @media(max-width:640px){.nav nav{display:none;}}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <span class="brand"><span class="dot"></span>Embargo</span>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#layers">Layers</a>
+      <a href="#start">Quick start</a>
+      <a href="https://github.com/berkotako/embargo">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- HERO -->
+  <div class="hero">
+    <span class="pill">Self-hosted · open · enforced as a gate</span>
+    <h1>A <span class="accent">dependency firewall</span><br>for npm</h1>
+    <p class="lead">Embargo sits in front of the npm registry and <strong>refuses to serve</strong>
+      package versions until they pass age, provenance, and behavioral-risk checks.
+      A firewall that blocks — not a scanner that warns after the fact.</p>
+    <div class="cta">
+      <a class="btn primary" href="#start">Get started</a>
+      <a class="btn ghost" href="https://github.com/berkotako/embargo">View on GitHub</a>
+    </div>
+    <div class="hero-img"><img src="assets/hero.png" alt="npm packages flowing into a firewall that sorts them into allow, hold, and block lanes"></div>
+  </div>
+</main>
+
+<!-- WHY -->
+<section id="why">
+  <div class="wrap">
+    <div class="eyebrow">The problem</div>
+    <h2>The supply chain is the attack surface</h2>
+    <p class="muted">The npm ecosystem has been hit by a wave of supply-chain attacks — token-hijacked
+      releases of hugely popular packages, self-propagating worms, review-bypass via orphan commits,
+      and install- or import-time backdoors. Native package-manager cooldowns help against the
+      smash-and-grab window, but they're global, have no exception mechanism, and can't act on
+      <em>why</em> a version is suspicious. Embargo adds what the package managers structurally won't:
+      per-scope policy, fast-track exceptions, signal gating, CI admission control, and install
+      containment.</p>
+  </div>
+</section>
+
+<!-- VERDICTS -->
+<section id="verdicts">
+  <div class="wrap center">
+    <div class="eyebrow">The model</div>
+    <h2>Every version gets one verdict</h2>
+    <p class="muted center">Embargo intercepts the package metadata your resolver fetches and filters
+      it — so npm, pnpm, Yarn, and Bun simply never pick a held or denied version.</p>
+    <div class="figure narrow"><img src="assets/explainer.png" alt="Three verdict cards: allow, hold, deny"></div>
+    <div class="legend">
+      <div class="verdict"><div class="tag"><span class="sw" style="background:var(--emerald)"></span>ALLOW</div><small>served normally</small></div>
+      <div class="verdict"><div class="tag"><span class="sw" style="background:var(--amber)"></span>HOLD</div><small>withheld during cooldown / review</small></div>
+      <div class="verdict"><div class="tag"><span class="sw" style="background:var(--red)"></span>DENY</div><small>blocked — flagged by a signal or advisory</small></div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW -->
+<section id="how">
+  <div class="wrap center">
+    <div class="eyebrow">How it works</div>
+    <h2>One line in <span class="mono">.npmrc</span></h2>
+    <p class="muted center">Point your client at Embargo. Held and denied versions are stripped before
+      your resolver ever sees them — a pinned-but-held version degrades to a clear error with an
+      approval link, never a cryptic resolver failure.</p>
+    <div class="figure"><img src="assets/usage-flow.png" alt="Point .npmrc at Embargo, install, the gate sorts allow/hold/block, only safe versions land"></div>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+  <div class="wrap center">
+    <div class="eyebrow">Architecture</div>
+    <h2>The engine is the brain</h2>
+    <p class="muted center">A client points <span class="mono">registry=</span> at the gateway, which
+      asks the engine for verdicts over mutual-TLS and strips disallowed versions. The engine resolves
+      cooldown + per-scope policy + provenance + behavioral signals + advisories — escalating
+      HOLD→DENY permanently when a version is flagged mid-cooldown.</p>
+    <div class="figure narrow"><img src="assets/architecture.png" alt="Client to gateway to engine, branching to a CI gate and sandbox runner, backed by a state store, feeds, and console"></div>
+  </div>
+</section>
+
+<!-- LAYERS -->
+<section id="layers">
+  <div class="wrap">
+    <div class="eyebrow">Defense in depth</div>
+    <h2>Three enforcement layers, one engine</h2>
+    <p class="muted">A miss at one layer is caught at the next — all fed by the same policy & signal engine.</p>
+    <div class="grid">
+      <div class="card"><div class="layer">L1 · Gateway</div><h3>Resolution-time firewall</h3>
+        <p>A Verdaccio plugin rewrites the packument, stripping HOLD/DENY versions. Catches
+          smash-and-grab token-hijack releases, missing provenance, and republish anomalies.</p></div>
+      <div class="card"><div class="layer">L2 · Admission</div><h3>CI gate</h3>
+        <p>A CLI + GitHub Action fails any build whose lockfile diff introduces a held or denied
+          version — diff-aware, so CI stays fast. Where most attacks actually land.</p></div>
+      <div class="card"><div class="layer">L3 · Sandbox</div><h3>Install containment</h3>
+        <p>A namespaced, egress-allowlisted install runner blocks and captures phone-home
+          postinstalls and the runtime secret→egress chain.</p></div>
+      <div class="card"><div class="layer">Core · Engine</div><h3>Policy &amp; signal engine</h3>
+        <p>Rust. Most-specific-wins per-scope policy, cooldown, provenance, and behavioral signals
+          scored as chains — never single APIs — with OSV advisory matching.</p></div>
+      <div class="card"><div class="layer">UI · Console</div><h3>Review &amp; approvals</h3>
+        <p>Quarantine review, policy authoring, time-boxed approvals, and a tamper-evident audit log —
+          OIDC login with server-side RBAC.</p></div>
+      <div class="card"><div class="layer">Policy</div><h3>Policy as code</h3>
+        <p>A versioned, per-scope YAML DSL: hold public packages, pass <span class="mono">@org/*</span>
+          instantly, fast-track emergency CVE fixes.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- QUICK START -->
+<section id="start">
+  <div class="wrap">
+    <div class="eyebrow">Quick start</div>
+    <h2>Up in one command</h2>
+    <p class="muted">Brings up the whole stack (engine, gateway, console, Postgres, Redis), waits for
+      health, and prints how to point a client at it.</p>
+    <pre class="code"><span class="c"># clone, then bring the stack up</span>
+git clone https://github.com/berkotako/embargo &amp;&amp; cd embargo
+<span class="g">make up</span>            <span class="c"># or: docker compose up --build</span>
+
+<span class="c"># firewall a project with one line</span>
+cd my-project
+echo <span class="g">'registry=http://localhost:4873/'</span> &gt;&gt; .npmrc
+npm install         <span class="c"># held / denied versions are stripped before resolve</span></pre>
+    <p class="muted" style="margin-top:22px;">Deploy a released build from published images, or read the
+      design — it's all in the docs.</p>
+    <div class="cta" style="justify-content:flex-start;margin-top:18px;">
+      <a class="btn primary" href="https://github.com/berkotako/embargo#readme">Read the docs</a>
+      <a class="btn ghost" href="https://github.com/berkotako/embargo/blob/main/DEPLOYMENT.md">Deployment guide</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span class="brand"><span class="dot"></span>Embargo</span>
+    <span>a self-hosted dependency firewall for npm</span>
+    <span class="sp"></span>
+    <a href="https://github.com/berkotako/embargo">GitHub</a>
+    <a href="https://github.com/berkotako/embargo/blob/main/ARCHITECTURE.md">Architecture</a>
+    <a href="https://github.com/berkotako/embargo/blob/main/docs/FAQ.md">FAQ</a>
+  </div>
+</footer>
+
+</body>
+</html>

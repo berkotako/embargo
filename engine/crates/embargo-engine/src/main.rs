@@ -13,6 +13,7 @@ mod registry;
 mod tarball;
 #[cfg(test)]
 mod testutil;
+mod tracker;
 
 use anyhow::Result;
 use tracing::info;
@@ -87,6 +88,9 @@ async fn main() -> Result<()> {
             Ok::<(), anyhow::Error>(())
         })
     };
+
+    // Background watchlist tracker (detached daemon over db::watchlist).
+    let _tracker = tracker::spawn(engine.clone());
 
     let grpc_server = grpc::serve(engine, &cfg).await?;
 

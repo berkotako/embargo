@@ -13,7 +13,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Json},
-    routing::{get, post},
+    routing::{get, patch, post},
     Router,
 };
 use embargo_core::policy::OnHardSignal;
@@ -57,6 +57,11 @@ pub fn router(state: EngineState) -> Router {
         .route("/api/approvals/{id}/revoke", post(revoke_approval))
         .route("/api/audit", get(list_audit))
         .route("/api/dashboard", get(get_dashboard))
+        .route("/api/watchlist", get(list_watchlist).post(add_watchlist))
+        .route(
+            "/api/watchlist/{id}",
+            patch(update_watchlist).delete(delete_watchlist),
+        )
         .with_state(state)
 }
 
@@ -573,6 +578,109 @@ async fn get_dashboard(
         top_signals,
         recent_events,
     }))
+}
+
+// ---- watchlist -------------------------------------------------------------
+
+async fn list_watchlist(
+    State(state): State<EngineState>,
+    user: AuthUser,
+) -> ApiResult<Vec<db::watchlist::WatchEntry>> {
+    require(&user, Permission::ReadPolicies)?;
+    Ok(Json(db::watchlist::list(&state.pool).await?))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddWatchBody {
+    target: String,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    interval_seconds: Option<i64>,
+}
+
+async fn add_watchlist(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    Json(body): Json<AddWatchBody>,
+) -> ApiResult<db::watchlist::WatchEntry> {
+    require(&user, Permission::ManageWatchlist)?;
+    let target = body.target.trim();
+    if target.is_empty() {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "target is required".into(),
+        ));
+    }
+    let kind = body.kind.as_deref().unwrap_or("package");
+    if kind != "package" && kind != "scope" {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "kind must be 'package' or 'scope'".into(),
+        ));
+    }
+    let interval = body.interval_seconds.unwrap_or(3600);
+    let entry = db::watchlist::add(
+        &state.pool,
+        target,
+        kind,
+        interval,
+        Some(user_uuid(&user.sub)),
+    )
+    .await?;
+    Ok(Json(entry))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateWatchBody {
+    enabled: Option<bool>,
+    interval_seconds: Option<i64>,
+}
+
+async fn update_watchlist(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<UpdateWatchBody>,
+) -> Result<StatusCode, ApiError> {
+    require(&user, Permission::ManageWatchlist)?;
+    let id = uuid::Uuid::parse_str(&id)
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid watchlist id".into()))?;
+    let mut found = false;
+    if let Some(enabled) = body.enabled {
+        found |= db::watchlist::set_enabled(&state.pool, id, enabled).await?;
+    }
+    if let Some(interval) = body.interval_seconds {
+        found |= db::watchlist::set_interval(&state.pool, id, interval).await?;
+    }
+    if found {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError(
+            StatusCode::NOT_FOUND,
+            "watchlist entry not found".into(),
+        ))
+    }
+}
+
+async fn delete_watchlist(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<StatusCode, ApiError> {
+    require(&user, Permission::ManageWatchlist)?;
+    let id = uuid::Uuid::parse_str(&id)
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid watchlist id".into()))?;
+    if db::watchlist::remove(&state.pool, id).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError(
+            StatusCode::NOT_FOUND,
+            "watchlist entry not found".into(),
+        ))
+    }
 }
 
 #[cfg(test)]

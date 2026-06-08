@@ -182,6 +182,19 @@ pub fn prior_version(packument: &Packument, version: &str) -> Option<String> {
         .map(|(k, _)| k.clone())
 }
 
+/// The most-recently-published version present in the packument (by `time`).
+/// Used by the watchlist tracker to evaluate a target's newest release.
+pub fn latest_version(packument: &Packument) -> Option<String> {
+    packument
+        .time
+        .iter()
+        .filter(|(k, _)| *k != "created" && *k != "modified")
+        .filter(|(k, _)| packument.versions.contains_key(*k))
+        .max_by(|a, b| a.1.cmp(b.1)) // ISO-8601 sorts lexically by time
+        .map(|(k, _)| k.clone())
+        .or_else(|| packument.versions.keys().next_back().cloned())
+}
+
 /// Count versions published within the hour before `version` (republish burst).
 pub fn republish_burst(packument: &Packument, version: &str) -> u32 {
     let Some(target) = packument.time.get(version).and_then(|t| parse_iso(t)) else {

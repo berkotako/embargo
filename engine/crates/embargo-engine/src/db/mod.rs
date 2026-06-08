@@ -10,6 +10,7 @@ pub mod provenance;
 pub mod signals;
 pub mod stats;
 pub mod verdicts;
+pub mod watchlist;
 
 pub async fn connect(cfg: &DatabaseConfig) -> Result<PgPool> {
     let pool = sqlx::postgres::PgPoolOptions::new()

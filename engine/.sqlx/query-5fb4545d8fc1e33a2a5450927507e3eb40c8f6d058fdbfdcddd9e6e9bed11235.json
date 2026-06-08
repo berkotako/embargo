@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE watchlist SET last_checked_at = $2, last_status = $3, updated_at = NOW() WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5fb4545d8fc1e33a2a5450927507e3eb40c8f6d058fdbfdcddd9e6e9bed11235"
+}

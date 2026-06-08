@@ -39,6 +39,8 @@ pub enum Permission {
     ReadAudit,
     ReadApprovals,
     WriteApprovals,
+    /// Add/modify/remove watchlist tracking targets (admin-only).
+    ManageWatchlist,
     /// Reserved for the policy-write endpoint (admin-only) once it lands.
     #[allow(dead_code)]
     WritePolicies,

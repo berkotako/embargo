@@ -37,6 +37,10 @@ jobs:
           cp assets/*.png _site/assets/
 
       - uses: actions/configure-pages@v5
+        with:
+          # Enable Pages (Source = GitHub Actions) automatically on first run,
+          # so no manual Settings → Pages toggle is needed.
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

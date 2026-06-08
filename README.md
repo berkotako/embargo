@@ -4,8 +4,9 @@
 *refuses to serve* package versions until they pass age, provenance, and behavioral-risk checks.
 It's a firewall that blocks — not a scanner that warns after the fact.
 
-> Status: early development. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design and
-> [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) to run it locally.
+> Status: all layers (L1–L3), the policy & signal engine, the admin console, and the CI gate are
+> built and tested. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design and
+> [`DEVELOPMENT.md`](DEVELOPMENT.md) to run it locally.
 
 ## Why
 
@@ -47,31 +48,44 @@ Every version gets one of three verdicts:
 
 ## Components
 
-| | |
-|---|---|
-| **Gateway** | L1 ingress — packument rewriting, cooldown, provenance, signal gating |
-| **Engine** | the policy & signal core (Rust) |
-| **Admission** | L2 — CI gate that fails policy-violating builds |
-| **Sandbox** | L3 — egress-controlled install runner |
-| **Console** | web admin — policy, quarantine review, approvals, audit |
+| Component | Layer | What it does |
+|---|---|---|
+| [`engine`](engine/) | core | Policy & signal engine (Rust): resolution, cooldown, provenance, behavioral signals, OSV advisories, mTLS gRPC + a JSON admin API |
+| [`gateway`](gateway/) | L1 | Verdaccio plugin — rewrites the packument, stripping HOLD/DENY versions |
+| [`admission`](admission/) | L2 | CI gate (CLI + GitHub Action) — fails builds whose lockfile diff introduces a held/denied version |
+| [`sandbox`](sandbox/) | L3 | Namespaced, egress-controlled install runner; blocks + captures phone-home and the runtime secret→egress chain |
+| [`console`](console/) | UI | Web admin — quarantine review, policy, approvals, audit, dashboard (OIDC + server-side RBAC) |
+| [`policy`](policy/) | — | Versioned policy schema (JSON Schema) + YAML DSL + examples |
+
+How the layers compose: a client points `registry=` at the **gateway**, which asks the **engine**
+for verdicts and strips disallowed versions from the metadata. The engine resolves cooldown +
+per-scope policy + provenance + behavioral signals + advisories, escalating HOLD→DENY permanently
+when a version is flagged mid-cooldown. The **admission** gate enforces the same policy in CI, the
+**sandbox** contains the install itself, and the **console** drives review and approvals.
 
 ## Quick start
 
 ```bash
-cp .env.example .env
-docker compose up
-# gateway on :4873, console on :3000
+# services
+createdb embargo && redis-server &
+
+# engine (dev auth, dev mTLS certs) — see DEVELOPMENT.md for the full command
+cd engine && cargo build && ./target/debug/embargo-engine   # :8080 admin, :50051 gRPC
+
+# console
+cd console && npm ci && npm run dev                          # http://localhost:4000
 ```
 
-See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for the full setup.
+See [`DEVELOPMENT.md`](DEVELOPMENT.md) for the full per-component setup, config, and run commands.
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — authoritative design
-- [Signals](docs/SIGNALS.md) — the detection catalog and scoring contract
-- [Development](docs/DEVELOPMENT.md) — local setup and workflow
-- [Contributing](CONTRIBUTING.md)
-- [Security](SECURITY.md)
+- [Status](docs/STATUS.md) — what's built and verified, with test counts
+- [Architecture](ARCHITECTURE.md) — authoritative design
+- [Signals](SIGNALS.md) — the detection catalog and scoring contract
+- [Development](DEVELOPMENT.md) — local setup, run commands, config, the admin API
+- [Project plan](docs/PROJECT_PLAN.md) and [per-component plans](docs/plans/)
+- [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 ## License
 

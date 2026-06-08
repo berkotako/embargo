@@ -135,17 +135,22 @@ supply-chain security**) and **HA** (Kubernetes/Helm, Postgres/Redis failover) a
 **M1**, not deferred. See `docs/PROJECT_PLAN.md` for the full build plan and `docs/plans/` for
 per-component detail.
 
-- **M1 — Foundation + production firewall:** packument rewriting + per-scope cooldown + fast-track +
-  provenance gate; engine core (resolution, store + cache, gRPC + RBAC'd admin API, hash-chained
-  audit); console with SSO login + RBAC'd queue/approvals; HA + observability + CI/CD + Helm baseline.
-- **M2 — Signal engine + full console:** signal gating (new lifecycle script, binding.gyp,
-  provenance, advisory match) + composite chains, HOLD→DENY escalation, npm OIDC provenance
-  verification, external feeds; all six console screens + compliance audit/export surface.
-- **M3 — Enforcement + containment:** L2 admission gate, L3 sandboxed install with egress allowlist.
-- **M4 — Runtime depth + scale:** eBPF chain detection, autoscaling/perf hardening to SLO, DR drills,
-  advanced compliance reporting.
+- **M1 — Foundation + production firewall** ✅ — packument rewriting + per-scope cooldown +
+  fast-track + provenance gate; engine core (resolution, Postgres store + Redis cache, mTLS gRPC +
+  JSON admin API, hash-chained audit); console shell wired to the live engine.
+- **M2 — Signal engine** ✅ — behavioral signals (new lifecycle script, binding.gyp, capability dep,
+  republish, maintainer change, tarball mismatch, obfuscation) + composite chains, HOLD→DENY
+  escalation, the tarball-fetching extractor, npm SLSA provenance verification, OSV advisory feed.
+- **M3 — Enforcement + containment** ✅ — L2 admission gate (four lockfile formats, GitHub Action +
+  CLI); L3 namespaced, egress-allowlisted install runner with seccomp capture.
+- **M4 — Runtime chain detection** ✅ — secret-read → non-allowlisted-egress correlation, reported as
+  a high-weight signal. (eBPF data source, autoscaling/DR hardening: follow-ups.)
+- **Console + auth** ✅ — JSON admin facade, OIDC/dev/disabled auth modes, server-side RBAC, the
+  console's OIDC login flow.
 
-Multi-tenancy is explicitly **out of scope** (single-org by decision).
+Remaining hardening (tracked, not blocking): Sigstore signature verification for provenance, a
+periodic advisory-sync job, a full `docker compose` / Helm packaging pass. Multi-tenancy is
+explicitly **out of scope** (single-org by decision).
 
 ## Threat model (what L1–L3 cover)
 

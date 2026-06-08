@@ -182,5 +182,6 @@ install-time containment.
 
 ## Support
 
-Embargo is free and self-hosted. If it saved you from a bad install and you'd like to say thanks,
-you can [**buy me a coffee** ☕](https://www.paypal.com/pool/9pSP95O3Zn?sr=wccr).
+Embargo is free and self-hosted. If it saved you from a bad install and you'd like to say thanks:
+
+<a href="https://buymeacoffee.com/berkotako"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy me a coffee"></a>

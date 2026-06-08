@@ -46,14 +46,17 @@ What compose wires up:
   on first boot (via `EMBARGO__BOOTSTRAP_POLICY_PATH`), so resolve has a policy to
   enforce immediately. Health-gated startup, depends on db + redis + certgen.
 - **console** is built with `VITE_AUTH_MODE=dev` and proxies `/api` → engine.
+- **gateway** is Verdaccio + the Embargo filter, talking to the engine over the
+  mTLS chain `certgen` issued. Point a client at it: `registry=http://localhost:4873/`.
 
 The console signs you in with a role picker (`viewer` / `responder` / `admin`)
 and the engine enforces RBAC on every call. For production, switch both to
 `oidc` (engine `EMBARGO__AUTH__MODE=oidc` + JWKS; console `VITE_AUTH_MODE=oidc`
 + `VITE_OIDC_*`).
 
-> The L1 gateway is not yet in compose — its Verdaccio plugin needs a
-> `filter_metadata` adapter + client mTLS (tracked follow-up).
+`certgen` runs `scripts/gen-dev-certs.sh` to mint a CA that signs the engine's
+server cert and the gateway/admission/sandbox client certs — the same script you
+can run locally (`scripts/gen-dev-certs.sh certs`) for non-Docker runs.
 
 The rest of this doc covers running each component directly (no Docker).
 

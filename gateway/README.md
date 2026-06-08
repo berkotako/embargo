@@ -68,11 +68,26 @@ Point a client at it:
 registry=http://localhost:4873/
 ```
 
+## End-to-end test
+
+`test/e2e.test.ts` drives the rewrite against a **live engine over mTLS**
+(skipped unless `EMBARGO_E2E` is set):
+
+```bash
+scripts/gen-dev-certs.sh /tmp/certs            # CA + engine + gateway certs
+# …start the engine with those certs + a seeded policy (see DEVELOPMENT.md)…
+EMBARGO_E2E=1 EMBARGO_ENGINE_ADDR=localhost:50051 EMBARGO_CERTS=/tmp/certs \
+  npm test -- e2e
+```
+
+It asserts a fresh (HELD) version is stripped while an aged one is served, and
+that a cert-less client is rejected (mTLS enforced).
+
 ## Notes
 
 - The gRPC proto is bundled into the image at
   `/verdaccio/plugins/verdaccio-embargo/proto` and located via `EMBARGO_PROTO_DIR`.
-- mTLS to the engine needs a client cert/key signed by the engine's CA; mount
-  them at the configured `tls-*` paths.
-- Adding the gateway to `docker compose` requires issuing that client cert
-  (extend the `certgen` service) — a tracked follow-up.
+- mTLS to the engine needs a client cert/key signed by the engine's CA. In
+  `docker compose` the `certgen` service issues the whole chain (CA + engine
+  server cert + `gateway` client cert) into a shared volume; the gateway service
+  mounts it and is wired up out of the box.

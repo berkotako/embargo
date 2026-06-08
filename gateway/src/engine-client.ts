@@ -30,11 +30,13 @@ export class EngineClient {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- grpc dynamic type
     const proto = grpc.loadPackageDefinition(pkgDef) as any;
 
-    const creds = grpc.credentials.createSsl(
-      Buffer.from(cfg.tlsCa),
-      Buffer.from(cfg.tlsKey),
-      Buffer.from(cfg.tlsCert),
-    );
+    // mTLS when a client cert+key are provided; otherwise server-auth only
+    // (the engine, configured with a client CA, will reject the handshake).
+    const ca = cfg.tlsCa ? Buffer.from(cfg.tlsCa) : null;
+    const creds =
+      cfg.tlsCert && cfg.tlsKey
+        ? grpc.credentials.createSsl(ca, Buffer.from(cfg.tlsKey), Buffer.from(cfg.tlsCert))
+        : grpc.credentials.createSsl(ca);
 
     this.client = new proto.embargo.v1.EngineService(cfg.engineAddr, creds);
   }

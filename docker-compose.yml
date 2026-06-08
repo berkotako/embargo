@@ -1,9 +1,11 @@
-# Embargo — local stack. `docker compose up --build` brings up:
-#   postgres + redis + engine (self-seeds a default policy) + console.
+# Embargo — full local stack. `docker compose up --build` brings up:
+#   postgres + redis + engine (self-seeds a default policy) + console + gateway.
+# certgen issues a CA-signed mTLS chain; the gateway talks to the engine over it.
 # The console runs in `dev` auth mode (role picker); the engine enforces RBAC.
 #
-# The L1 gateway (Verdaccio plugin) is not yet wired into compose — it needs a
-# Verdaccio `filter_metadata` adapter + client mTLS. See gateway/README.
+#   console  → http://localhost:4000      (sign in, pick a role)
+#   gateway  → http://localhost:4873      (registry= this to firewall a client)
+#   admin API → http://localhost:8080/api
 
 services:
   postgres:
@@ -28,25 +30,13 @@ services:
       timeout: 3s
       retries: 10
 
-  # Generate dev mTLS material for the engine's gRPC listener (idempotent).
+  # Generate the dev mTLS chain (CA + engine server cert + client certs).
   certgen:
     image: alpine:3.20
     volumes:
       - certs:/certs
-    command:
-      - sh
-      - -c
-      - |
-        set -e
-        if [ ! -f /certs/engine.crt ]; then
-          apk add --no-cache openssl >/dev/null
-          openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-            -keyout /certs/engine.key -out /certs/engine.crt -subj "/CN=engine"
-          cp /certs/engine.crt /certs/ca.crt
-          echo "generated dev certs"
-        else
-          echo "certs already present"
-        fi
+      - ./scripts/gen-dev-certs.sh:/gen-dev-certs.sh:ro
+    command: ["sh", "-c", "apk add --no-cache openssl >/dev/null && sh /gen-dev-certs.sh /certs"]
 
   engine:
     build:
@@ -96,6 +86,22 @@ services:
       - engine
     ports:
       - "4000:4000"
+
+  # L1 ingress firewall — Verdaccio with the Embargo storage filter. Point a
+  # client at it:  registry=http://localhost:4873/
+  gateway:
+    build:
+      context: . # repo root, so the engine proto can be bundled
+      dockerfile: gateway/Dockerfile
+    depends_on:
+      engine:
+        condition: service_healthy
+      certgen:
+        condition: service_completed_successfully
+    volumes:
+      - certs:/certs:ro
+    ports:
+      - "4873:4873"
 
 volumes:
   pg_data:

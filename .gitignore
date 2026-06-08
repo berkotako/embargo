@@ -1,6 +1,7 @@
 # Rust
 engine/target/
-engine/**/*.rs.bk
+sandbox/target/
+**/*.rs.bk
 
 # Node
 node_modules/

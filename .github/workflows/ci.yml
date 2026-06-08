@@ -133,6 +133,31 @@ jobs:
       - working-directory: console
         run: npm run build
 
+  sandbox:
+    name: Sandbox (Rust, L3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sandbox
+      - name: fmt
+        working-directory: sandbox
+        run: cargo fmt --all -- --check
+      - name: clippy
+        working-directory: sandbox
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Ensure unprivileged userns is enabled
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: test (incl. real containment)
+        working-directory: sandbox
+        run: cargo test -- --include-ignored
+
   policy-schema:
     name: Policy schema validation
     runs-on: ubuntu-latest

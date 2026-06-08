@@ -13,28 +13,44 @@ use embargo_core::types::{Provenance, Signal};
 use sqlx::PgPool;
 use tracing::{info, instrument};
 
+use crate::advisory::{self, AdvisoryClient};
 use crate::registry::{self, Packument, RegistryClient};
 use crate::{db, tarball};
 
 /// Fetch + analyze `package@version`, persist its signals, and return them.
-#[instrument(skip(client, pool), fields(pkg = package, ver = version))]
+#[instrument(skip(registry, advisory, pool), fields(pkg = package, ver = version))]
 pub async fn extract_and_store(
-    client: &dyn RegistryClient,
+    registry: &dyn RegistryClient,
+    advisory: &dyn AdvisoryClient,
     pool: &PgPool,
     package: &str,
     version: &str,
 ) -> Result<Vec<Signal>> {
-    let packument = client.packument(package).await?;
+    let packument = registry.packument(package).await?;
 
-    let (current, provenance) = build_artifact(client, &packument, package, version).await?;
+    let (current, provenance) = build_artifact(registry, &packument, package, version).await?;
 
     // The immediately-preceding published version, for diff-based signals.
     let prior = match registry::prior_version(&packument, version) {
-        Some(pv) => Some(build_artifact(client, &packument, package, &pv).await?.0),
+        Some(pv) => Some(build_artifact(registry, &packument, package, &pv).await?.0),
         None => None,
     };
 
-    let signals = extract_signals(&current, prior.as_ref());
+    let mut signals = extract_signals(&current, prior.as_ref());
+
+    // Advisory feed match → critical advisory_match signal (auto-DENY). A feed
+    // error must not let a version through, but also must not block all
+    // extraction: log and continue with the behavioral signals we have.
+    match advisory.query(package, version).await {
+        Ok(advisories) => {
+            for adv in &advisories {
+                info!(advisory = %adv.id, "advisory match");
+                signals.push(advisory::to_signal(adv));
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "advisory feed query failed; skipping advisory match"),
+    }
+
     info!(count = signals.len(), provenance = ?provenance, "extracted signals");
 
     db::signals::replace_for_version(pool, package, version, &signals).await?;

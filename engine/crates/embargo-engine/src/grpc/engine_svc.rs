@@ -212,14 +212,17 @@ fn spawn_extraction(state: EngineState, package: String, version: String) {
     tokio::spawn(async move {
         match crate::extractor::extract_and_store(
             state.registry.as_ref(),
+            state.advisory.as_ref(),
             &state.pool,
             &package,
             &version,
         )
         .await
         {
-            Ok(signals) if !signals.is_empty() => {
-                // Drop the cached verdict so the next resolve re-evaluates with signals.
+            Ok(signals) => {
+                // Always drop the cached verdict: extraction may have recorded
+                // signals and/or a provenance result, either of which changes
+                // the verdict on the next resolve.
                 let mut cache = VerdictCache::from_conn(
                     state.redis.clone(),
                     state.config.redis.verdict_ttl_secs,
@@ -227,9 +230,8 @@ fn spawn_extraction(state: EngineState, package: String, version: String) {
                 if let Err(e) = cache.invalidate(&package, &version).await {
                     tracing::warn!(%package, %version, error = %e, "cache invalidate after extraction failed");
                 }
-                tracing::info!(%package, %version, count = signals.len(), "background extraction stored signals");
+                tracing::info!(%package, %version, count = signals.len(), "background extraction complete");
             }
-            Ok(_) => {}
             Err(e) => {
                 tracing::warn!(%package, %version, error = %e, "background signal extraction failed");
             }
@@ -304,8 +306,9 @@ rules:
     enabled: true
 "#;
 
-    async fn test_state_with(
+    async fn test_state_with_clients(
         registry: std::sync::Arc<dyn crate::registry::RegistryClient>,
+        advisory: std::sync::Arc<dyn crate::advisory::AdvisoryClient>,
     ) -> EngineState {
         let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let redis_url =
@@ -353,13 +356,22 @@ rules:
             },
             metrics_addr: "[::]:0".into(),
             upstream_registry: "https://registry.npmjs.org".into(),
+            osv_endpoint: "https://api.osv.dev".into(),
         };
 
-        EngineState::new(pool, redis, config, registry)
+        EngineState::new(pool, redis, config, registry, advisory)
     }
 
-    /// Default state: a registry that serves nothing. Tests that seed signals
-    /// directly don't rely on extraction; any background extraction no-ops.
+    /// State with a custom registry and a clean (no-match) advisory feed.
+    async fn test_state_with(
+        registry: std::sync::Arc<dyn crate::registry::RegistryClient>,
+    ) -> EngineState {
+        let advisory = std::sync::Arc::new(crate::advisory::MockAdvisoryClient::default());
+        test_state_with_clients(registry, advisory).await
+    }
+
+    /// Default state: a registry that serves nothing and a clean advisory feed.
+    /// Tests that seed signals directly don't rely on extraction.
     async fn test_state() -> EngineState {
         let registry = std::sync::Arc::new(crate::registry::MockRegistryClient::default());
         test_state_with(registry).await
@@ -481,10 +493,15 @@ rules:
         let ver = "1.1.0";
 
         // Run the background extractor synchronously for the assertion.
-        let signals =
-            crate::extractor::extract_and_store(state.registry.as_ref(), &state.pool, &pkg, ver)
-                .await
-                .unwrap();
+        let signals = crate::extractor::extract_and_store(
+            state.registry.as_ref(),
+            state.advisory.as_ref(),
+            &state.pool,
+            &pkg,
+            ver,
+        )
+        .await
+        .unwrap();
         assert!(
             signals.iter().any(
                 |s| matches!(&s.signal_type, SignalType::Other { name } if name == "stealer_chain")
@@ -527,9 +544,15 @@ rules:
         );
 
         // Extract: the mock serves no attestation → Provenance::Absent.
-        crate::extractor::extract_and_store(state.registry.as_ref(), &state.pool, &pkg, ver)
-            .await
-            .unwrap();
+        crate::extractor::extract_and_store(
+            state.registry.as_ref(),
+            state.advisory.as_ref(),
+            &state.pool,
+            &pkg,
+            ver,
+        )
+        .await
+        .unwrap();
         let mut cache = crate::cache::VerdictCache::from_conn(
             state.redis.clone(),
             state.config.redis.verdict_ttl_secs,
@@ -556,9 +579,15 @@ rules:
         let pkg = unique("prov");
         let ver = "1.0.0";
 
-        crate::extractor::extract_and_store(state.registry.as_ref(), &state.pool, &pkg, ver)
-            .await
-            .unwrap();
+        crate::extractor::extract_and_store(
+            state.registry.as_ref(),
+            state.advisory.as_ref(),
+            &state.pool,
+            &pkg,
+            ver,
+        )
+        .await
+        .unwrap();
 
         let r = resolve_one(&state, &pkg, ver, ts_hours_ago(200))
             .await
@@ -567,6 +596,53 @@ rules:
             r.verdict,
             ProtoVerdict::Allow as i32,
             "verified provenance + aged version must ALLOW"
+        );
+    }
+
+    /// Advisory feed match: extraction records an advisory_match signal from the
+    /// feed; resolve converts it to an automatic DENY even for an aged version
+    /// that would otherwise be ALLOW.
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn advisory_feed_match_denies() {
+        let registry = std::sync::Arc::new(crate::testutil::benign_registry(false));
+        let advisory = std::sync::Arc::new(crate::advisory::MockAdvisoryClient {
+            advisories: vec![crate::advisory::Advisory {
+                id: "GHSA-feed-0001".into(),
+                summary: "malicious code in demo".into(),
+                aliases: vec!["CVE-2024-9999".into()],
+                severity: None,
+            }],
+        });
+        let state = test_state_with_clients(registry, advisory).await;
+        // Non-"itest-prov" name → hits the "**" rule (require_provenance false).
+        let pkg = unique("advfeed");
+        let ver = "1.0.0";
+
+        let signals = crate::extractor::extract_and_store(
+            state.registry.as_ref(),
+            state.advisory.as_ref(),
+            &state.pool,
+            &pkg,
+            ver,
+        )
+        .await
+        .unwrap();
+        assert!(
+            signals
+                .iter()
+                .any(|s| s.signal_type == SignalType::AdvisoryMatch),
+            "advisory match must be recorded: {signals:?}"
+        );
+
+        // Aged version would be ALLOW; the advisory forces DENY.
+        let r = resolve_one(&state, &pkg, ver, ts_hours_ago(200))
+            .await
+            .unwrap();
+        assert_eq!(
+            r.verdict,
+            ProtoVerdict::Deny as i32,
+            "advisory feed match must DENY"
         );
     }
 }

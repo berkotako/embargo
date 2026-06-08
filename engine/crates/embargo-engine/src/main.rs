@@ -1,3 +1,4 @@
+mod advisory;
 mod cache;
 mod config;
 mod db;
@@ -32,7 +33,8 @@ async fn main() -> Result<()> {
     let registry = std::sync::Arc::new(registry::HttpRegistryClient::new(
         cfg.upstream_registry.clone(),
     )?);
-    let engine = grpc::EngineState::new(pool, redis, cfg.clone(), registry);
+    let advisory = std::sync::Arc::new(advisory::OsvClient::new(cfg.osv_endpoint.clone())?);
+    let engine = grpc::EngineState::new(pool, redis, cfg.clone(), registry, advisory);
     let grpc_server = grpc::serve(engine, &cfg).await?;
 
     // Each arm is JoinHandle<Result<()>>; `??` unwraps the JoinError then the inner Result.

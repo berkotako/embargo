@@ -11,6 +11,8 @@ pub struct Config {
     pub metrics_addr: String,
     /// Upstream npm registry the signal extractor fetches packuments/tarballs from.
     pub upstream_registry: String,
+    /// OSV advisory database endpoint for advisory matching.
+    pub osv_endpoint: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -64,6 +66,7 @@ impl Config {
             .set_default("observability.log_format", "json")?
             .set_default("observability.log_level", "info")?
             .set_default("upstream_registry", "https://registry.npmjs.org")?
+            .set_default("osv_endpoint", "https://api.osv.dev")?
             .build()?;
         Ok(cfg.try_deserialize()?)
     }

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 
+use crate::advisory::AdvisoryClient;
 use crate::config::Config;
 use crate::registry::RegistryClient;
 
@@ -18,6 +19,8 @@ pub struct EngineState {
     pub config: Config,
     /// Upstream registry client used by the background signal extractor.
     pub registry: Arc<dyn RegistryClient>,
+    /// Advisory feed (OSV) client used by the extractor for advisory matching.
+    pub advisory: Arc<dyn AdvisoryClient>,
 }
 
 impl EngineState {
@@ -26,12 +29,14 @@ impl EngineState {
         redis: redis::aio::MultiplexedConnection,
         config: Config,
         registry: Arc<dyn RegistryClient>,
+        advisory: Arc<dyn AdvisoryClient>,
     ) -> Self {
         Self {
             pool,
             redis,
             config,
             registry,
+            advisory,
         }
     }
 }

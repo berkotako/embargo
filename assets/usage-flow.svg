@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="480" viewBox="0 0 1600 480" font-family="IBM Plex Sans, system-ui, sans-serif">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="80%">
+      <stop offset="0%" stop-color="#11161f"/>
+      <stop offset="100%" stop-color="#0b0e14"/>
+    </radialGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="membrane" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0"/>
+      <stop offset="22%" stop-color="#34d399" stop-opacity=".95"/>
+      <stop offset="78%" stop-color="#34d399" stop-opacity=".95"/>
+      <stop offset="100%" stop-color="#34d399" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="480" fill="url(#bg)"/>
+  <!-- faint grid -->
+  <g stroke="#1b2230" stroke-width="1" opacity=".5">
+    <path d="M0 120H1600M0 360H1600"/>
+    <path d="M400 0V480M800 0V480M1200 0V480"/>
+  </g>
+
+  <!-- connectors -->
+  <g stroke="#2b3548" stroke-width="2.5" fill="none" opacity=".9">
+    <path d="M330 240H372" marker-end="url(#arrow)"/>
+    <path d="M730 240H772" marker-end="url(#arrow)"/>
+    <path d="M1130 240H1172" marker-end="url(#arrow)"/>
+  </g>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#34d399"/>
+    </marker>
+  </defs>
+
+  <!-- STEP 1 — .npmrc -->
+  <g transform="translate(60,120)">
+    <rect width="270" height="240" rx="16" fill="#11161f" stroke="#222a39"/>
+    <rect x="40" y="38" width="190" height="150" rx="10" fill="#0d1219" stroke="#2b3548"/>
+    <text x="58" y="74" fill="#5b6478" font-family="IBM Plex Mono, monospace" font-size="13">.npmrc</text>
+    <line x1="58" y1="92" x2="212" y2="92" stroke="#1b2230"/>
+    <text x="58" y="126" fill="#818ca0" font-family="IBM Plex Mono, monospace" font-size="13">registry=</text>
+    <text x="58" y="150" fill="#34d399" font-family="IBM Plex Mono, monospace" font-size="13">  embargo</text>
+  </g>
+
+  <!-- STEP 2 — install -->
+  <g transform="translate(460,120)">
+    <rect width="270" height="240" rx="16" fill="#11161f" stroke="#222a39"/>
+    <rect x="40" y="38" width="190" height="150" rx="10" fill="#0d1219" stroke="#2b3548"/>
+    <text x="58" y="78" fill="#34d399" font-family="IBM Plex Mono, monospace" font-size="15">$</text>
+    <text x="78" y="78" fill="#e6eaf2" font-family="IBM Plex Mono, monospace" font-size="15">npm i</text>
+    <g fill="#2b3548"><rect x="58" y="104" width="120" height="9" rx="4"/><rect x="58" y="124" width="150" height="9" rx="4"/><rect x="58" y="144" width="96" height="9" rx="4"/></g>
+  </g>
+
+  <!-- STEP 3 — firewall sorts -->
+  <g transform="translate(860,120)">
+    <rect width="270" height="240" rx="16" fill="#11161f" stroke="#222a39"/>
+    <!-- membrane -->
+    <rect x="131" y="28" width="8" height="184" rx="4" fill="url(#membrane)" filter="url(#soft)"/>
+    <!-- incoming packages (left) -->
+    <g rx="4">
+      <rect x="34" y="58" width="22" height="22" rx="4" fill="#11301f" stroke="#34d399"/>
+      <rect x="34" y="108" width="22" height="22" rx="4" fill="#332a12" stroke="#f59e0b"/>
+      <rect x="34" y="158" width="22" height="22" rx="4" fill="#321717" stroke="#ef4444"/>
+    </g>
+    <!-- pass / hold / block -->
+    <path d="M60 69H125" stroke="#34d399" stroke-width="2" stroke-dasharray="3 4"/>
+    <rect x="196" y="58" width="22" height="22" rx="4" fill="#11301f" stroke="#34d399"/>
+    <path d="M145 69H190" stroke="#34d399" stroke-width="2" marker-end="url(#arrow)"/>
+    <!-- hold stays at wall -->
+    <circle cx="120" cy="119" r="5" fill="#f59e0b"/>
+    <!-- block stops -->
+    <circle cx="120" cy="169" r="6" fill="none" stroke="#ef4444" stroke-width="2"/>
+    <path d="M116 165l8 8M124 165l-8 8" stroke="#ef4444" stroke-width="2"/>
+  </g>
+
+  <!-- STEP 4 — clean project -->
+  <g transform="translate(1260,120)">
+    <rect width="270" height="240" rx="16" fill="#11161f" stroke="#222a39"/>
+    <rect x="60" y="48" width="150" height="110" rx="10" fill="#0d1219" stroke="#2b3548"/>
+    <rect x="60" y="158" width="150" height="10" rx="5" fill="#1b2230"/>
+    <circle cx="135" cy="103" r="30" fill="#11301f" stroke="#34d399" stroke-width="2"/>
+    <path d="M122 103l9 10 18-21" fill="none" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- step numbers -->
+  <g font-family="IBM Plex Mono, monospace" font-size="13" fill="#5b6478">
+    <text x="60" y="392">01 · point .npmrc</text>
+    <text x="460" y="392">02 · install</text>
+    <text x="860" y="392">03 · gate sorts allow / hold / block</text>
+    <text x="1260" y="392">04 · only safe versions land</text>
+  </g>
+</svg>

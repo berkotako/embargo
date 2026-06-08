@@ -8,6 +8,16 @@ the console palette — slate `#0f172a`, emerald / amber / red, no baked-in text
 | `hero.png` | Top-of-README hero banner | 1600×760 |
 | `architecture.png` | Architecture-section diagram | 1400×1000 |
 | `explainer.png` | Three-verdict cards in "How it works" | 1400×480 |
+| `usage-flow.png` | Four-step usage strip in "How it works" | 1600×480 |
+| `faq-banner.png` | Header banner in `docs/FAQ.md` | 1600×420 |
+
+`usage-flow` and `faq-banner` are hand-authored SVG (editable source committed
+alongside as `*.svg`) rasterized to PNG with `@resvg/resvg-js`. To re-render
+after editing the SVG:
+
+```bash
+npx @resvg/resvg-js  # or a one-off node script using { fitTo: { mode: 'width', value: 1600 } }
+```
 
 ## Generating with Claude Design
 

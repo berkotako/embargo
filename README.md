@@ -44,6 +44,10 @@ Embargo intercepts the package metadata npm fetches before resolving and filters
 violate policy — so your resolver simply never picks a held or denied version. Works with npm,
 pnpm, Yarn, and Bun.
 
+<p align="center">
+  <img src="assets/usage-flow.png" alt="Point .npmrc at Embargo, install, the gate sorts allow/hold/block, only safe versions land" width="100%">
+</p>
+
 Every version gets one of three verdicts:
 
 <p align="center">

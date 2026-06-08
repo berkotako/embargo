@@ -1,5 +1,9 @@
 # FAQ
 
+<p align="center">
+  <img src="../assets/faq-banner.png" alt="Embargo FAQ" width="100%">
+</p>
+
 Common questions about what Embargo is, how to use it, and how it behaves.
 For the design see [`ARCHITECTURE.md`](../ARCHITECTURE.md), to run it
 [`DEVELOPMENT.md`](../DEVELOPMENT.md), to deploy it

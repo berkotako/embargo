@@ -72,6 +72,31 @@ pub fn detect(current: &VersionArtifact, singles: &[Signal]) -> Vec<Signal> {
         ));
     }
 
+    // --- Lookalike dropper -----------------------------------------------
+    // A typosquatted name that also runs code at install time. Name resemblance
+    // is suspicious; resemblance + install-time execution is a dropper.
+    let install_exec = super::LIFECYCLE_KEYS.iter().any(|k| {
+        current
+            .manifest
+            .scripts
+            .get(*k)
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+    });
+    if has(singles, &SignalType::Typosquat) && install_exec {
+        out.push(finding(
+            SignalType::Other {
+                name: "lookalike_dropper".into(),
+            },
+            Severity::Critical,
+            weights::LOOKALIKE_DROPPER_CHAIN,
+            serde_json::json!({
+                "chain": "lookalike_dropper",
+                "constituents": ["typosquat", "install_lifecycle_script"],
+            }),
+        ));
+    }
+
     out
 }
 

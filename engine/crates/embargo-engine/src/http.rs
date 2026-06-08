@@ -150,6 +150,7 @@ fn signal_type_str(s: &Signal) -> String {
         T::MaintainerChange => "maintainer_change".into(),
         T::TarballMismatch => "tarball_mismatch".into(),
         T::Obfuscation => "obfuscation".into(),
+        T::Typosquat => "typosquat".into(),
         T::AdvisoryMatch => "advisory_match".into(),
         T::ProvenanceAbsent => "provenance_absent".into(),
         T::SandboxEgressAttempt => "sandbox_egress_attempt".into(),

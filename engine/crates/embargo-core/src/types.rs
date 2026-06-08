@@ -96,6 +96,8 @@ pub enum SignalType {
     MaintainerChange,
     TarballMismatch,
     Obfuscation,
+    /// Package name is a near-miss of a popular one (typosquatting / impersonation).
+    Typosquat,
     AdvisoryMatch,
     ProvenanceAbsent,
     SandboxEgressAttempt,

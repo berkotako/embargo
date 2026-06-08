@@ -18,6 +18,7 @@ pub mod maintainer;
 pub mod obfuscation;
 pub mod republish;
 pub mod tarball_mismatch;
+pub mod typosquat;
 
 /// Default starting weights (0–100). Tune against real traffic; see SIGNALS.md.
 pub mod weights {
@@ -28,10 +29,12 @@ pub mod weights {
     pub const OBFUSCATION: u32 = 40;
     pub const REPUBLISH: u32 = 60;
     pub const MAINTAINER_CHANGE: u32 = 30;
+    pub const TYPOSQUAT: u32 = 50;
     // Composite chains score higher than any single constituent.
     pub const STEALER_CHAIN: u32 = 95;
     pub const OUT_OF_PIPELINE_CHAIN: u32 = 90;
     pub const NATIVE_EXEC_CHAIN: u32 = 85;
+    pub const LOOKALIKE_DROPPER_CHAIN: u32 = 92;
 }
 
 /// A parsed package version, normalized from the tarball + registry metadata.
@@ -94,6 +97,7 @@ pub fn extract_signals(current: &VersionArtifact, prior: Option<&VersionArtifact
     signals.extend(obfuscation::detect(current));
     signals.extend(republish::detect(current));
     signals.extend(maintainer::detect(current, prior));
+    signals.extend(typosquat::detect(current));
 
     // Composite chains compose the single findings above into intent.
     let chain_signals = chains::detect(current, &signals);

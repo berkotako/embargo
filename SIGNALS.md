@@ -47,6 +47,10 @@ Weights are starting points — tune on real traffic. `H` = high, `M` = medium, 
 | `advisory_match` | OSV / GitHub Advisory hit during cooldown | external feeds | DENY |
 | `sandbox_egress_attempt` | install tried to reach non-allowlisted host | L3 containment | H |
 | `obfuscation_markers` | high-entropy/packed payload; known stealer patterns | static scan | M |
+| `typosquat` | package name is a near-miss of a popular one (edit-distance / separator / homoglyph) | name vs. bundled popular-name corpus | M |
+
+Name-based signals (`typosquat`) evaluate the package name alone, so they fire on
+a brand-new package with no prior version — exactly when a squatted dropper lands.
 
 ## Composite chains (emit when constituents co-occur)
 
@@ -55,6 +59,8 @@ Weights are starting points — tune on real traffic. `H` = high, `M` = medium, 
 - **Out-of-pipeline poison:** `provenance_missing` + `tarball_repo_mismatch` → DENY candidate.
   Mirrors orphan-commit review-bypass.
 - **Native exec smuggling:** `binding_gyp_introduced` + `obfuscation_markers` → DENY candidate.
+- **Lookalike dropper:** `typosquat` + an install-time lifecycle script → DENY candidate. A name
+  impersonating a popular package that also executes code on install.
 
 ## Implementation notes
 

@@ -1,0 +1,10 @@
+{
+  "name": "acme-internal-billing-utils",
+  "version": "1.2.0",
+  "description": "Internal billing helpers — a normal package name, not close to any popular package.",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest"
+  }
+}

@@ -69,13 +69,18 @@ The fastest real deployment. On the host that will run Embargo:
 
 ```bash
 git clone <your-fork> embargo && cd embargo
-docker compose up --build -d
+make up                       # build + start, wait for health, print next steps
+# (equivalently: docker compose up --build -d)
 
 # console      → http://<host>:4000
 # gateway      → http://<host>:4873   (clients point registry= here)
 # admin API    → http://<host>:8080/api
 # engine health→ http://<host>:9090/health/ready
 ```
+
+`make up` runs [`scripts/quickstart.sh`](scripts/quickstart.sh), which waits for
+the engine's readiness probe and prints the client-onboarding snippet. Set
+`EMBARGO_HOST=<dns>` to advertise a non-local hostname in that output.
 
 Out of the box compose runs in **dev auth** (role picker) with a **dev CA**.
 That is fine for an internal trial, **not** for production — see hardening
@@ -110,13 +115,23 @@ EMBARGO__AUTH__MODE=oidc
 EMBARGO__AUTH__ISSUER=https://idp.example.com/
 EMBARGO__AUTH__AUDIENCE=embargo
 EMBARGO__AUTH__JWKS_URL=https://idp.example.com/.well-known/jwks.json
-EMBARGO__AUTH__ADMIN_ROLES=embargo-admin
-EMBARGO__AUTH__RESPONDER_ROLES=embargo-responder
 ```
 
 Build the console with `VITE_AUTH_MODE=oidc` and `VITE_OIDC_AUTHORITY` /
 `VITE_OIDC_CLIENT_ID` / `VITE_OIDC_SCOPE`. RBAC is enforced **server-side**;
 roles map from your IdP groups. (Full auth reference: [`DEVELOPMENT.md`](DEVELOPMENT.md#admin-facade--auth).)
+
+The role mapping defaults to the IdP groups `embargo-admin` and
+`embargo-responder`. To map different group names, set `auth.admin_roles` /
+`auth.responder_roles` as **arrays in a `config/engine.yaml`** file — list values
+are not supported through `EMBARGO__*` env vars:
+
+```yaml
+# config/engine.yaml
+auth:
+  admin_roles: ["platform-admins"]
+  responder_roles: ["secops"]
+```
 
 ### 3. Close the gate (`fail-closed`)
 

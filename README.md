@@ -132,18 +132,30 @@ the full threat model (which attack maps to which defense).
 
 ## Quick start
 
+One command brings the whole stack up (Postgres + Redis + engine + console + gateway),
+waits until the engine is healthy, and prints how to point a client at it:
+
 ```bash
-# services
-createdb embargo && redis-server &
-
-# engine (dev auth, dev mTLS certs) — see DEVELOPMENT.md for the full command
-cd engine && cargo build && ./target/debug/embargo-engine   # :8080 admin, :50051 gRPC
-
-# console
-cd console && npm ci && npm run dev                          # http://localhost:4000
+make up          # builds + starts everything, self-seeds the default policy
 ```
 
-See [`DEVELOPMENT.md`](DEVELOPMENT.md) for the full per-component setup, config, and run commands.
+```
+Console     http://localhost:4000     (sign in, pick a role)
+Gateway     http://localhost:4873     (point clients here)
+Admin API   http://localhost:8080/api
+```
+
+Then firewall any project with one line — `make onboard` writes its `.npmrc`:
+
+```bash
+cd my-project && make -C /path/to/embargo onboard   # or: echo 'registry=http://localhost:4873/' >> .npmrc
+npm install                                          # held/denied versions are stripped before resolve
+```
+
+`make` lists everything else (`down`, `logs`, `health`, `test`, …). Prefer raw
+Docker? `docker compose up --build`. Running components without Docker (Rust
+engine, Vite console, …) is covered in [`DEVELOPMENT.md`](DEVELOPMENT.md);
+production deployment is in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ## Documentation
 

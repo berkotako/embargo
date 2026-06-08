@@ -11,15 +11,20 @@
 import type {
   Approval,
   AuditEntry,
+  CurrentUser,
   DashboardStats,
   PolicyRule,
+  UserRole,
   VersionVerdict,
 } from '../types/index.ts';
+import { authHeaders } from '../lib/auth.ts';
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { headers: { accept: 'application/json' } });
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { accept: 'application/json', ...authHeaders() },
+  });
   if (!res.ok) throw new ApiError(res.status, `GET ${path} failed`);
   return (await res.json()) as T;
 }
@@ -27,7 +32,7 @@ async function get<T>(path: string): Promise<T> {
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    headers: { 'content-type': 'application/json', accept: 'application/json', ...authHeaders() },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   if (!res.ok) throw new ApiError(res.status, `${method} ${path} failed`);
@@ -125,4 +130,27 @@ export async function getAuditLog(limit = 50): Promise<AuditEntry[]> {
 
 export async function getDashboardStats(): Promise<DashboardStats> {
   return get<DashboardStats>('/dashboard');
+}
+
+// ---------------------------------------------------------------------------
+// Session
+// ---------------------------------------------------------------------------
+
+interface WhoAmI {
+  email: string;
+  role: UserRole;
+  authMode: string;
+}
+
+/** Establish the session: the engine returns the server-enforced role. */
+export async function whoami(): Promise<CurrentUser> {
+  const w = await get<WhoAmI>('/whoami');
+  const name = w.email.split('@')[0] || w.email || 'user';
+  return {
+    id: w.email,
+    email: w.email,
+    name,
+    role: w.role,
+    avatarInitials: (name[0] ?? 'U').toUpperCase(),
+  };
 }

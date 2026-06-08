@@ -49,6 +49,7 @@ fn user_uuid(sub: &str) -> Uuid {
 pub fn router(state: EngineState) -> Router {
     Router::new()
         .route("/api/health", get(|| async { "ok" }))
+        .route("/api/whoami", get(whoami))
         .route("/api/verdicts", get(list_verdicts))
         .route("/api/policies", get(get_policies))
         .route("/api/policies/dryrun", get(get_dryrun))
@@ -57,6 +58,30 @@ pub fn router(state: EngineState) -> Router {
         .route("/api/audit", get(list_audit))
         .route("/api/dashboard", get(get_dashboard))
         .with_state(state)
+}
+
+/// The authenticated principal — the console calls this on load to establish
+/// its session and learn the server-enforced role (the UI only reflects it).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WhoAmI {
+    email: String,
+    role: String,
+    /// The facade's auth mode, so the console knows how to authenticate.
+    auth_mode: String,
+}
+
+async fn whoami(State(state): State<EngineState>, user: AuthUser) -> Json<WhoAmI> {
+    let auth_mode = match state.auth.mode {
+        crate::auth::Mode::Oidc => "oidc",
+        crate::auth::Mode::Dev => "dev",
+        crate::auth::Mode::Disabled => "disabled",
+    };
+    Json(WhoAmI {
+        email: user.email,
+        role: user.role.as_str().into(),
+        auth_mode: auth_mode.into(),
+    })
 }
 
 // ---- error helper ----------------------------------------------------------
@@ -683,6 +708,24 @@ rules:
         .await
         .unwrap();
         test_state_auth(std::sync::Arc::new(auth)).await
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn whoami_reflects_role_and_mode() {
+        let state = dev_state().await;
+        let resp = router(state)
+            .oneshot(req_role("GET", "/api/whoami", "responder", None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["role"], "responder");
+        assert_eq!(v["authMode"], "dev");
+        assert_eq!(v["email"], "u@x.com");
     }
 
     fn req_role(method: &str, uri: &str, role: &str, body: Option<&str>) -> Request<Body> {

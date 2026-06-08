@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { CurrentUser } from './types/index.ts';
 import { ScreenQuarantine } from './screens/Quarantine.tsx';
@@ -6,14 +6,9 @@ import { ScreenDashboard } from './screens/Dashboard.tsx';
 import { ScreenPolicy } from './screens/Policy.tsx';
 import { ScreenApprovals } from './screens/Approvals.tsx';
 import { ScreenAudit } from './screens/Audit.tsx';
-
-const MOCK_USER: CurrentUser = {
-  id: 'u-alice',
-  email: 'alice@example.com',
-  name: 'Alice',
-  role: 'admin',
-  avatarInitials: 'A',
-};
+import { LoginScreen } from './screens/Login.tsx';
+import { whoami } from './data/api.ts';
+import { handleOidcCallback, hasCredentials, logout } from './lib/auth.ts';
 
 const NAV = [
   { path: '/quarantine', label: 'Quarantine', icon: '⊘', countKey: 'held' },
@@ -61,6 +56,12 @@ function Sidebar({ user }: { user: CurrentUser }) {
         </div>
         <div>{user.email}</div>
         <div style={{ color: 'var(--accent-2)' }}>{user.role}</div>
+        <div
+          onClick={logout}
+          style={{ cursor: 'pointer', color: 'var(--text-dim)', marginTop: 2 }}
+        >
+          sign out
+        </div>
       </div>
     </aside>
   );
@@ -113,11 +114,59 @@ function Layout({ user }: { user: CurrentUser }) {
   );
 }
 
+type SessionState =
+  | { status: 'loading' }
+  | { status: 'login'; error?: string }
+  | { status: 'ready'; user: CurrentUser };
+
 export default function App() {
-  const [user] = useState<CurrentUser>(MOCK_USER);
+  const [session, setSession] = useState<SessionState>({ status: 'loading' });
+
+  async function establish() {
+    try {
+      const user = await whoami();
+      setSession({ status: 'ready', user });
+    } catch (err) {
+      // Only surface an error when we actually had credentials that were rejected;
+      // an unauthenticated first load just needs the login screen.
+      if (hasCredentials()) {
+        const msg = err instanceof Error ? err.message : 'sign-in required';
+        setSession({ status: 'login', error: msg });
+      } else {
+        setSession({ status: 'login' });
+      }
+    }
+  }
+
+  useEffect(() => {
+    (async () => {
+      try {
+        // Complete an OIDC redirect if we're returning from the IdP.
+        await handleOidcCallback();
+      } catch (err) {
+        setSession({ status: 'login', error: err instanceof Error ? err.message : 'login failed' });
+        return;
+      }
+      await establish();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (session.status === 'loading') {
+    return (
+      <div style={{ height: '100vh', display: 'grid', placeItems: 'center', color: 'var(--text-dim)' }}>
+        connecting to engine…
+      </div>
+    );
+  }
+
+  if (session.status === 'login') {
+    return <LoginScreen onAuthenticated={establish} error={session.error ?? null} />;
+  }
+
   return (
     <BrowserRouter>
-      <Layout user={user} />
+      <Layout user={session.user} />
     </BrowserRouter>
   );
 }

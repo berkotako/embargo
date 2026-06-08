@@ -9,6 +9,8 @@ pub struct Config {
     pub tls: TlsConfig,
     pub observability: ObservabilityConfig,
     pub metrics_addr: String,
+    /// Address for the JSON admin HTTP facade the console talks to.
+    pub admin_http_addr: String,
     /// Upstream npm registry the signal extractor fetches packuments/tarballs from.
     pub upstream_registry: String,
     /// OSV advisory database endpoint for advisory matching.
@@ -63,6 +65,7 @@ impl Config {
             .set_default("redis.verdict_ttl_secs", 300u64)?
             .set_default("grpc.addr", "[::]:50051")?
             .set_default("metrics_addr", "[::]:9090")?
+            .set_default("admin_http_addr", "[::]:8080")?
             .set_default("observability.log_format", "json")?
             .set_default("observability.log_level", "info")?
             .set_default("upstream_registry", "https://registry.npmjs.org")?

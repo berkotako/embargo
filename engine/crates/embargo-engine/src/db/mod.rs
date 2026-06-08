@@ -8,6 +8,7 @@ pub mod audit;
 pub mod policies;
 pub mod provenance;
 pub mod signals;
+pub mod stats;
 pub mod verdicts;
 
 pub async fn connect(cfg: &DatabaseConfig) -> Result<PgPool> {

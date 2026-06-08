@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT d::date AS \"day!\", COALESCE(c.n, 0) AS \"n!\"\n        FROM generate_series(\n            (NOW() - INTERVAL '6 days')::date, NOW()::date, INTERVAL '1 day'\n        ) AS d\n        LEFT JOIN (\n            SELECT computed_at::date AS day, COUNT(*) AS n\n            FROM verdicts WHERE verdict = 2 GROUP BY computed_at::date\n        ) c ON c.day = d::date\n        ORDER BY d\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "day!",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "2924c88974ffe319557f3820e36a31fa551f45944b988710f1b43e2c7c5e641b"
+}

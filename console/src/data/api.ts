@@ -1,12 +1,11 @@
 // ---------------------------------------------------------------------------
-// API stub — the seam between mock data (now) and the live engine (M2).
+// Live engine API. Talks to the engine's JSON admin facade (see
+// engine/src/http.rs). In dev, Vite proxies /api → the engine (vite.config.ts);
+// in production nginx proxies /api → the engine. Responses are already shaped
+// (camelCase) to match the domain types, so mapping is the identity.
 //
-// Every function returns a Promise wrapping mock data with a simulated network
-// delay. To wire the real engine, replace each function body with a fetch()
-// call to the engine's HTTP admin facade (or gRPC-web gateway).
-//
-// IMPORTANT: Do not add engine logic here. The engine owns all verdict
-// computation. This file only translates HTTP responses to domain types.
+// IMPORTANT: the engine owns all verdict computation. This file only performs
+// HTTP and returns typed results.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -16,20 +15,35 @@ import type {
   PolicyRule,
   VersionVerdict,
 } from '../types/index.ts';
-import {
-  MOCK_APPROVALS,
-  MOCK_AUDIT,
-  MOCK_DENIED,
-  MOCK_DRYRUN,
-  MOCK_HELD,
-  MOCK_POLICIES,
-  MOCK_STATS,
-} from './mock.ts';
 
-const LATENCY = 180; // ms — simulates realistic network round-trip
+const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
 
-function delay<T>(value: T): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), LATENCY));
+async function get<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { headers: { accept: 'application/json' } });
+  if (!res.ok) throw new ApiError(res.status, `GET ${path} failed`);
+  return (await res.json()) as T;
+}
+
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  if (!res.ok) throw new ApiError(res.status, `${method} ${path} failed`);
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -37,19 +51,19 @@ function delay<T>(value: T): Promise<T> {
 // ---------------------------------------------------------------------------
 
 export async function getHeldVersions(): Promise<VersionVerdict[]> {
-  return delay([...MOCK_HELD]);
+  return get<VersionVerdict[]>('/verdicts?verdict=hold');
 }
 
 export async function getDeniedVersions(): Promise<VersionVerdict[]> {
-  return delay([...MOCK_DENIED]);
+  return get<VersionVerdict[]>('/verdicts?verdict=deny');
 }
 
 export async function getVersionVerdict(
   pkg: string,
   version: string,
 ): Promise<VersionVerdict | null> {
-  const all = [...MOCK_HELD, ...MOCK_DENIED];
-  return delay(all.find((v) => v.package === pkg && v.version === version) ?? null);
+  const all = [...(await getHeldVersions()), ...(await getDeniedVersions())];
+  return all.find((v) => v.package === pkg && v.version === version) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,20 +71,18 @@ export async function getVersionVerdict(
 // ---------------------------------------------------------------------------
 
 export async function getPolicies(): Promise<PolicyRule[]> {
-  return delay([...MOCK_POLICIES]);
+  return get<PolicyRule[]>('/policies');
 }
 
-export async function upsertPolicy(rule: PolicyRule): Promise<PolicyRule> {
-  return delay(rule);
+export interface DryRun {
+  total: number;
+  nowBlocked: number;
+  wouldRelease: number;
+  affectedPkgs: string[];
 }
 
-export async function deletePolicy(id: string): Promise<void> {
-  void id;
-  return delay(undefined);
-}
-
-export async function getDryRun(): Promise<typeof MOCK_DRYRUN> {
-  return delay({ ...MOCK_DRYRUN });
+export async function getDryRun(): Promise<DryRun> {
+  return get<DryRun>('/policies/dryrun');
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +90,7 @@ export async function getDryRun(): Promise<typeof MOCK_DRYRUN> {
 // ---------------------------------------------------------------------------
 
 export async function getApprovals(): Promise<Approval[]> {
-  return delay([...MOCK_APPROVALS]);
+  return get<Approval[]>('/approvals');
 }
 
 export async function createApproval(
@@ -87,23 +99,16 @@ export async function createApproval(
   justification: string,
   ttlHours: number,
 ): Promise<Approval> {
-  const approval: Approval = {
-    id: crypto.randomUUID(),
+  return send<Approval>('POST', '/approvals', {
     package: pkg,
     version,
-    requesterId: 'current-user',
-    approverId: null,
     justification,
-    expiresAt: new Date(Date.now() + ttlHours * 3600_000).toISOString(),
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-  };
-  return delay(approval);
+    ttlHours,
+  });
 }
 
-export async function revokeApproval(id: string, _reason: string): Promise<void> {
-  void id;
-  return delay(undefined);
+export async function revokeApproval(id: string, reason: string): Promise<void> {
+  await send<void>('POST', `/approvals/${encodeURIComponent(id)}/revoke`, { reason });
 }
 
 // ---------------------------------------------------------------------------
@@ -111,8 +116,7 @@ export async function revokeApproval(id: string, _reason: string): Promise<void>
 // ---------------------------------------------------------------------------
 
 export async function getAuditLog(limit = 50): Promise<AuditEntry[]> {
-  void limit;
-  return delay([...MOCK_AUDIT]);
+  return get<AuditEntry[]>(`/audit?limit=${limit}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -120,5 +124,5 @@ export async function getAuditLog(limit = 50): Promise<AuditEntry[]> {
 // ---------------------------------------------------------------------------
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  return delay({ ...MOCK_STATS });
+  return get<DashboardStats>('/dashboard');
 }

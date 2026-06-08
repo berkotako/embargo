@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*) AS \"total!\",\n               COUNT(*) FILTER (WHERE verdict IN (2, 3)) AS \"blocked!\"\n        FROM verdicts\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "blocked!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "f2d014995f287f5c78eb0f22e30f03198a4e52bfd18176449a8c98b41fdd3896"
+}

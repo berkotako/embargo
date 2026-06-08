@@ -5,6 +5,50 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+/// A stored audit row, ready to serialize for the console.
+pub struct AuditRow {
+    pub id: Uuid,
+    pub actor: serde_json::Value,
+    pub action: String,
+    pub target: serde_json::Value,
+    pub before: Option<serde_json::Value>,
+    pub after: Option<serde_json::Value>,
+    pub timestamp: chrono::DateTime<Utc>,
+    pub prev_hash: Option<String>,
+    pub content_hash: String,
+}
+
+/// List recent audit entries (newest first).
+pub async fn list(pool: &PgPool, limit: i64) -> Result<Vec<AuditRow>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT id, actor, action, target, before_state, after_state,
+               timestamp, prev_hash, content_hash
+        FROM audit_log
+        ORDER BY sequence DESC
+        LIMIT $1
+        "#,
+        limit,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| AuditRow {
+            id: r.id,
+            actor: r.actor,
+            action: r.action,
+            target: r.target,
+            before: r.before_state,
+            after: r.after_state,
+            timestamp: r.timestamp,
+            prev_hash: r.prev_hash,
+            content_hash: r.content_hash,
+        })
+        .collect())
+}
+
 /// Append an audit entry with SHA-256 hash chaining.
 /// Each entry's hash folds in the prior entry's hash, making tampering evident.
 pub async fn append(

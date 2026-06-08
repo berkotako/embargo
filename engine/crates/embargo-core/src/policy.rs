@@ -79,6 +79,16 @@ fn glob_specificity(pattern: &str) -> u32 {
     4
 }
 
+/// Specificity (0–4) of a rule `scope`, which may be a comma-separated glob
+/// list — the best (highest) of its globs. The console renders this 1–4.
+pub fn scope_specificity(scope: &str) -> u32 {
+    scope
+        .split(',')
+        .map(|g| glob_specificity(g.trim()))
+        .max()
+        .unwrap_or(0)
+}
+
 /// Compiled rule ready for fast matching.
 struct CompiledRule {
     globs: GlobSet,

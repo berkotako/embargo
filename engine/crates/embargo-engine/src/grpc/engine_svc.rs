@@ -355,6 +355,7 @@ rules:
                 log_level: "info".into(),
             },
             metrics_addr: "[::]:0".into(),
+            admin_http_addr: "[::]:0".into(),
             upstream_registry: "https://registry.npmjs.org".into(),
             osv_endpoint: "https://api.osv.dev".into(),
         };

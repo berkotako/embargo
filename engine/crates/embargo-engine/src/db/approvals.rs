@@ -12,23 +12,25 @@ pub struct Approval {
     pub approver_id: Uuid,
     pub justification: String,
     pub expires_at: DateTime<Utc>,
-    // `status` and `created_at` are part of the approvals API surface returned
-    // by the console's list view (admin_svc::list_approvals lands in M2);
-    // resolve only needs approver_id + expires_at.
-    #[allow(dead_code)]
     pub status: ApprovalStatus,
-    #[allow(dead_code)]
     pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApprovalStatus {
     Active,
-    // Constructed when list_approvals maps the `status` column (M2).
-    #[allow(dead_code)]
     Expired,
-    #[allow(dead_code)]
     Revoked,
+}
+
+impl ApprovalStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ApprovalStatus::Active => "active",
+            ApprovalStatus::Expired => "expired",
+            ApprovalStatus::Revoked => "revoked",
+        }
+    }
 }
 
 /// Returns an active, unexpired approval for the exact (package, version) pair.
@@ -103,6 +105,46 @@ pub async fn create(
         status: ApprovalStatus::Active,
         created_at: Utc::now(),
     })
+}
+
+/// List recent approvals (newest first), marking expired ones.
+pub async fn list(pool: &PgPool, limit: i64) -> Result<Vec<Approval>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT id, package, version, requester_id, approver_id, justification,
+               expires_at, status, created_at
+        FROM approvals
+        ORDER BY created_at DESC
+        LIMIT $1
+        "#,
+        limit,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let now = Utc::now();
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let status = match row.status.as_str() {
+                "revoked" => ApprovalStatus::Revoked,
+                "active" if row.expires_at <= now => ApprovalStatus::Expired,
+                "active" => ApprovalStatus::Active,
+                _ => ApprovalStatus::Expired,
+            };
+            Approval {
+                id: row.id,
+                package: row.package,
+                version: row.version,
+                requester_id: row.requester_id,
+                approver_id: row.approver_id,
+                justification: row.justification,
+                expires_at: row.expires_at,
+                status,
+                created_at: row.created_at,
+            }
+        })
+        .collect())
 }
 
 pub async fn revoke(pool: &PgPool, approval_id: Uuid, reason: &str) -> Result<bool> {

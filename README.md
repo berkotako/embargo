@@ -165,6 +165,8 @@ production deployment is in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 - [FAQ](docs/FAQ.md) — what it is, how to use it, how verdicts behave
 - [Development](DEVELOPMENT.md) — local setup, run commands, config, the admin API
 - [Deployment](DEPLOYMENT.md) — production topology, hardening, client onboarding
+- [Release](docs/RELEASE.md) — deploy a released build from published images; how to cut a release
+- [Changelog](CHANGELOG.md) — release notes
 - [Project plan](docs/PROJECT_PLAN.md) and [per-component plans](docs/plans/)
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 

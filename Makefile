@@ -5,8 +5,11 @@ SHELL := /usr/bin/env bash
 COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 HOST    ?= localhost
 
+PROD := $(COMPOSE) -f compose.prod.yml
+
 .PHONY: help up down restart logs ps health onboard seed-check \
-        test test-engine test-gateway test-admission test-console clean
+        test test-engine test-gateway test-admission test-console clean \
+        prod-pull prod-up prod-down prod-logs
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -32,6 +35,21 @@ ps: ## Show service status
 
 health: ## Curl the engine readiness endpoint
 	@curl -fsS http://localhost:9090/health/ready && echo "  engine ready" || echo "engine not ready"
+
+## ---- released build (published GHCR images) ----
+prod-pull: ## Pull the pinned released images (needs .env)
+	@$(PROD) pull
+
+prod-up: ## Start the released stack from published images (needs .env)
+	@test -f .env || { echo "create .env first: cp .env.example .env"; exit 1; }
+	@$(PROD) up -d
+	@echo "started — console :4000 · gateway :4873 · admin :8080 (run 'make health')"
+
+prod-down: ## Stop the released stack
+	@$(PROD) down
+
+prod-logs: ## Tail logs from the released stack
+	@$(PROD) logs -f
 
 ## ---- use it ----
 onboard: ## Point the current project's .npmrc at the gateway (REGISTRY=... to override)

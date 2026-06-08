@@ -51,21 +51,41 @@ authenticates each caller by client certificate.
 
 | Path | Deployment artifact |
 |---|---|
-| [`docker-compose.yml`](docker-compose.yml) | Full stack: postgres + redis + certgen + engine + console + gateway |
+| [`compose.prod.yml`](compose.prod.yml) | Production stack from **published GHCR images** (no local build) |
+| [`docker-compose.yml`](docker-compose.yml) | Dev stack that builds from source (postgres + redis + certgen + engine + console + gateway) |
+| [`.github/workflows/release.yml`](.github/workflows/release.yml) | Tag-triggered build + push of the three images to GHCR |
 | [`engine/Dockerfile`](engine/Dockerfile) | Engine image (`:50051` gRPC, `:8080` admin, `:9090` metrics) |
 | [`gateway/Dockerfile`](gateway/Dockerfile) | Verdaccio + Embargo filter (`:4873`) |
 | [`console/Dockerfile`](console/Dockerfile) | Static console behind nginx (`:4000`) |
 | [`scripts/gen-dev-certs.sh`](scripts/gen-dev-certs.sh) | Dev CA + server/client mTLS chain |
 | [`admission/action.yml`](admission/action.yml) | L2 CI gate as a GitHub Action |
 
-> **Not yet in-repo:** a published Helm chart and a hardened, pinned-image
-> production compose file are tracked follow-ups (see [`docs/STATUS.md`](docs/STATUS.md)).
-> The Kubernetes section below describes the **target topology** to translate the
-> compose services into manifests; it is guidance, not shipped YAML.
+> **Not yet in-repo:** a published Helm chart is a tracked follow-up (see
+> [`docs/STATUS.md`](docs/STATUS.md)). The Kubernetes section below describes the
+> **target topology** to translate the compose services into manifests; it is
+> guidance, not shipped YAML.
 
-## Quick deploy — Docker Compose
+## Deploy a released build (recommended)
 
-The fastest real deployment. On the host that will run Embargo:
+No build toolchain — pull the pinned, published images:
+
+```bash
+git clone https://github.com/berkotako/embargo && cd embargo
+cp .env.example .env           # set POSTGRES_PASSWORD, EMBARGO_VERSION, auth, host
+docker compose -f compose.prod.yml pull
+docker compose -f compose.prod.yml up -d     # or: make prod-up
+make health
+```
+
+`compose.prod.yml` pins images to `${EMBARGO_VERSION}`, restarts on failure,
+persists Postgres, and ships the **fail-closed** gateway config. It still
+includes the dev `certgen` CA so it runs immediately — replace it with your own
+PKI for real production (below). Full release/upgrade flow:
+[`docs/RELEASE.md`](docs/RELEASE.md).
+
+## Quick deploy from source — Docker Compose
+
+To build locally instead of pulling images (e.g. hacking on the stack):
 
 ```bash
 git clone <your-fork> embargo && cd embargo
@@ -82,8 +102,8 @@ make up                       # build + start, wait for health, print next steps
 the engine's readiness probe and prints the client-onboarding snippet. Set
 `EMBARGO_HOST=<dns>` to advertise a non-local hostname in that output.
 
-Out of the box compose runs in **dev auth** (role picker) with a **dev CA**.
-That is fine for an internal trial, **not** for production — see hardening
+Out of the box both compose files run in **dev auth** (role picker) with a **dev
+CA**. That is fine for an internal trial, **not** for production — see hardening
 below.
 
 ## Production hardening checklist

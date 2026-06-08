@@ -1,0 +1,35 @@
+# Production Verdaccio config for the Embargo gateway. Mounted over the image's
+# default config by compose.prod.yml. Difference from the dev config: the gate
+# is FAIL-CLOSED — if the engine is unreachable the gateway refuses to serve
+# rather than serving npm unfiltered.
+
+storage: /verdaccio/storage
+plugins: /verdaccio/plugins
+
+uplinks:
+  npmjs:
+    url: https://registry.npmjs.org/
+
+packages:
+  '@*/*':
+    access: $all
+    proxy: npmjs
+  '**':
+    access: $all
+    proxy: npmjs
+
+filters:
+  embargo:
+    engine-addr: engine:50051
+    # Approval links surfaced in resolver errors point here. Edit to your
+    # console's public URL.
+    console-url: http://localhost:4000
+    tls-cert: /certs/gateway.crt
+    tls-key: /certs/gateway.key
+    tls-ca: /certs/ca.crt
+    # Production: refuse to serve when the engine can't be reached. The gate
+    # stays shut rather than failing open.
+    fail-closed: true
+
+log: { type: stdout, format: json, level: info }
+listen: 0.0.0.0:4873

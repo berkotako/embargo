@@ -1,0 +1,119 @@
+# Embargo — production stack from PUBLISHED images (no local build).
+#
+#   cp .env.example .env      # set POSTGRES_PASSWORD, EMBARGO_VERSION, auth, host
+#   docker compose -f compose.prod.yml pull
+#   docker compose -f compose.prod.yml up -d
+#
+# Images come from GHCR, pinned to ${EMBARGO_VERSION} (the released tag). For a
+# real deployment you should additionally: bring your own mTLS CA (replace the
+# certgen service / mount your certs), switch auth to OIDC, and point at managed
+# Postgres/Redis. See DEPLOYMENT.md.
+#
+#   console  → http://<host>:4000
+#   gateway  → http://<host>:4873   (registry= this to firewall a client)
+#   admin API → http://<host>:8080/api
+
+x-images:
+  engine: &engine_image ghcr.io/berkotako/embargo-engine:${EMBARGO_VERSION:-0.1.0}
+  gateway: &gateway_image ghcr.io/berkotako/embargo-gateway:${EMBARGO_VERSION:-0.1.0}
+  console: &console_image ghcr.io/berkotako/embargo-console:${EMBARGO_VERSION:-0.1.0}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-embargo}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Dev-grade CA so the stack runs out of the box. For real production, replace
+  # this with your own CA / cert-manager and mount the chain into the `certs`
+  # volume (see DEPLOYMENT.md §1).
+  certgen:
+    image: alpine:3.20
+    volumes:
+      - certs:/certs
+      - ./scripts/gen-dev-certs.sh:/gen-dev-certs.sh:ro
+    command: ["sh", "-c", "apk add --no-cache openssl >/dev/null && sh /gen-dev-certs.sh /certs"]
+
+  engine:
+    image: *engine_image
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      certgen: { condition: service_completed_successfully }
+    environment:
+      EMBARGO__DATABASE__URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-embargo}
+      EMBARGO__DATABASE__MAX_CONNECTIONS: "10"
+      EMBARGO__REDIS__URL: redis://redis:6379
+      EMBARGO__REDIS__VERDICT_TTL_SECS: "300"
+      EMBARGO__GRPC__ADDR: "0.0.0.0:50051"
+      EMBARGO__ADMIN_HTTP_ADDR: "0.0.0.0:8080"
+      EMBARGO__METRICS_ADDR: "0.0.0.0:9090"
+      EMBARGO__TLS__CERT_PEM: /certs/engine.crt
+      EMBARGO__TLS__KEY_PEM: /certs/engine.key
+      EMBARGO__TLS__CA_PEM: /certs/ca.crt
+      EMBARGO__OBSERVABILITY__LOG_FORMAT: json
+      EMBARGO__OBSERVABILITY__LOG_LEVEL: info
+      EMBARGO__BOOTSTRAP_POLICY_PATH: /policy/default.yaml
+      # Auth: defaults to `dev` (role picker) so the stack is usable immediately.
+      # Set EMBARGO__AUTH__MODE=oidc + the OIDC vars in .env for production.
+      EMBARGO__AUTH__MODE: ${EMBARGO__AUTH__MODE:-dev}
+      EMBARGO__AUTH__ISSUER: ${EMBARGO__AUTH__ISSUER:-}
+      EMBARGO__AUTH__AUDIENCE: ${EMBARGO__AUTH__AUDIENCE:-}
+      EMBARGO__AUTH__JWKS_URL: ${EMBARGO__AUTH__JWKS_URL:-}
+    volumes:
+      - certs:/certs:ro
+      - ./policy/examples/default.yaml:/policy/default.yaml:ro
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  console:
+    image: *console_image
+    restart: unless-stopped
+    depends_on:
+      - engine
+    ports:
+      - "4000:4000"
+
+  gateway:
+    image: *gateway_image
+    restart: unless-stopped
+    depends_on:
+      engine: { condition: service_healthy }
+      certgen: { condition: service_completed_successfully }
+    volumes:
+      - certs:/certs:ro
+      # Fail-closed production gateway config (overrides the image default).
+      - ./gateway/verdaccio.config.prod.yaml:/verdaccio/conf/config.yaml:ro
+    ports:
+      - "4873:4873"
+
+volumes:
+  pg_data:
+  certs:

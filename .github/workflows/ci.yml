@@ -72,7 +72,10 @@ jobs:
         run: sqlx migrate run --source migrations
       - name: Integration tests
         working-directory: engine
-        run: cargo test -p embargo-engine -- --include-ignored
+        # Single-threaded: these DB-backed tests share one Postgres + Redis and a
+        # single active-policy row, so running them in parallel makes them stomp
+        # each other (flaky). Serialize for deterministic results.
+        run: cargo test -p embargo-engine -- --include-ignored --test-threads=1
 
   gateway:
     name: Gateway (TS)

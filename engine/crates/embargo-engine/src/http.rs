@@ -298,11 +298,36 @@ struct DryRunDto {
 async fn get_dryrun(State(state): State<EngineState>, user: AuthUser) -> ApiResult<DryRunDto> {
     require(&user, Permission::ReadPolicies)?;
     let (total, blocked) = db::stats::dryrun(&state.pool).await?;
+
+    // Preview detail from the current quarantine, reusing the cached verdict
+    // queries (no extra SQL): `would_release` = held versions whose cooldown
+    // window has already lapsed (they'd flip to ALLOW on the next resolve absent
+    // a signal); `affected_pkgs` = distinct packages under an active HOLD/DENY.
+    // Sampled to a preview-sized window.
+    const PREVIEW_CAP: i64 = 1000;
+    let held = db::verdicts::list_by_verdict(&state.pool, Verdict::Hold, PREVIEW_CAP, 0).await?;
+    let denied = db::verdicts::list_by_verdict(&state.pool, Verdict::Deny, PREVIEW_CAP, 0).await?;
+
+    let now = chrono::Utc::now();
+    let would_release = held
+        .iter()
+        .filter(|v| v.expires_at.is_some_and(|exp| exp <= now))
+        .count() as i64;
+
+    let mut affected_pkgs: Vec<String> = held
+        .iter()
+        .chain(denied.iter())
+        .map(|v| v.package.clone())
+        .collect();
+    affected_pkgs.sort();
+    affected_pkgs.dedup();
+    affected_pkgs.truncate(50);
+
     Ok(Json(DryRunDto {
         total,
         now_blocked: blocked,
-        would_release: 0,
-        affected_pkgs: vec![],
+        would_release,
+        affected_pkgs,
     }))
 }
 

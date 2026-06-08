@@ -1,0 +1,44 @@
+name: 'Embargo Admission Gate'
+description: 'Fail the build when a lockfile diff introduces a version held or denied by Embargo policy.'
+author: 'Embargo'
+branding:
+  icon: 'shield'
+  color: 'blue'
+inputs:
+  lockfile:
+    description: 'Path to the lockfile to evaluate.'
+    required: false
+    default: 'package-lock.json'
+  base-ref:
+    description: 'Git ref to diff against (the base of the PR).'
+    required: false
+    default: 'origin/main'
+  engine-addr:
+    description: 'host:port of the Embargo engine EngineService.'
+    required: true
+  console-url:
+    description: 'Base URL of the Embargo console, for approval links.'
+    required: false
+    default: ''
+  tls-cert:
+    description: 'Path to the client mTLS certificate (PEM).'
+    required: false
+    default: ''
+  tls-key:
+    description: 'Path to the client mTLS private key (PEM).'
+    required: false
+    default: ''
+  tls-ca:
+    description: 'Path to the CA certificate (PEM).'
+    required: false
+    default: ''
+outputs:
+  passed:
+    description: 'true when all changed dependencies resolved to ALLOW.'
+  blocked-count:
+    description: 'Number of changed dependencies blocked by policy.'
+  report:
+    description: 'JSON report artifact of the evaluation.'
+runs:
+  using: 'node20'
+  main: 'dist/action.js'

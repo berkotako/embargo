@@ -6,8 +6,10 @@ engine/**/*.rs.bk
 node_modules/
 gateway/node_modules/
 console/node_modules/
+admission/node_modules/
 gateway/dist/
 console/dist/
+admission/dist/
 
 # Env / secrets
 .env

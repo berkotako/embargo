@@ -93,6 +93,27 @@ jobs:
       - working-directory: gateway
         run: npm test
 
+  admission:
+    name: Admission (TS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: admission/package-lock.json
+      - working-directory: admission
+        run: npm ci
+      - working-directory: admission
+        run: npm run typecheck
+      - working-directory: admission
+        run: npm run lint
+      - working-directory: admission
+        run: npm test
+      - working-directory: admission
+        run: npm run build
+
   console:
     name: Console (React/TS)
     runs-on: ubuntu-latest

@@ -1,6 +1,7 @@
 //! engine.ReportEvent client. Containment events become high-weight signals
 //! (`sandbox_egress_attempt`) that can escalate a verdict to DENY.
 
+use crate::chain::ChainDetection;
 use crate::seccomp::BlockedEgress;
 use anyhow::{Context, Result};
 
@@ -37,6 +38,37 @@ pub fn build_request(
         evidence_json: evidence.to_string(),
         // High weight; chains in the engine can escalate this to DENY.
         weight: 90,
+        reporter_service: "sandbox".to_string(),
+    }
+}
+
+/// Build a runtime compromise-chain event. Maps to the engine's
+/// `EbpfCompromiseChain` signal — the highest-confidence containment finding.
+pub fn build_chain_request(
+    package: &str,
+    version: &str,
+    chain: &ChainDetection,
+    pipeline: &str,
+    repo: &str,
+) -> ReportEventRequest {
+    let evidence = serde_json::json!({
+        "pkg": package,
+        "host": chain.dest.to_string(),
+        "pipeline": pipeline,
+        "repo": repo,
+        "attempts": 1,
+        "time": chrono_now(),
+        "note": "runtime compromise chain: secret read then non-allowlisted egress",
+        "secret_path": chain.secret_path,
+        "pid": chain.pid,
+    });
+    ReportEventRequest {
+        event_type: "ebpf_chain".to_string(),
+        package: package.to_string(),
+        version: version.to_string(),
+        evidence_json: evidence.to_string(),
+        // Highest weight: a completed chain is intent, not a single fact.
+        weight: 100,
         reporter_service: "sandbox".to_string(),
     }
 }

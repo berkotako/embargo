@@ -5,7 +5,8 @@
 //! supervises egress and reaps the child.
 
 use crate::allowlist::Allowlist;
-use crate::seccomp::{self, BlockedEgress};
+use crate::chain::{ChainDetection, ChainDetector};
+use crate::seccomp::{self, BlockedEgress, SupervisorEvent};
 use anyhow::{bail, Context, Result};
 use nix::sys::socket::{
     recvmsg, sendmsg, socketpair, AddressFamily, ControlMessage, ControlMessageOwned, MsgFlags,
@@ -22,6 +23,7 @@ use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 pub struct RunOutcome {
     pub exit_code: i32,
     pub blocked: Vec<BlockedEgress>,
+    pub chains: Vec<ChainDetection>,
 }
 
 pub struct RunConfig {
@@ -31,11 +33,15 @@ pub struct RunConfig {
     /// Isolate via user+pid+mount namespaces (best-effort; required for the
     /// user-notify listener to install unprivileged).
     pub isolate: bool,
+    /// Enable runtime compromise-chain detection (also observes openat()).
+    pub detect_chain: bool,
+    /// Chain correlation window (secret-read → egress) in milliseconds.
+    pub chain_window_ms: u64,
 }
 
-/// Run the command under egress supervision. `on_block` is invoked for each
-/// blocked destination (the binary wires this to engine.ReportEvent).
-pub fn run(cfg: &RunConfig, mut on_block: impl FnMut(&BlockedEgress)) -> Result<RunOutcome> {
+/// Run the command under egress supervision. `on_event` is invoked for each
+/// blocked egress and chain detection (the binary wires this to ReportEvent).
+pub fn run(cfg: &RunConfig, mut on_event: impl FnMut(&SupervisorEvent)) -> Result<RunOutcome> {
     if cfg.command.is_empty() {
         bail!("empty command");
     }
@@ -61,12 +67,23 @@ pub fn run(cfg: &RunConfig, mut on_block: impl FnMut(&BlockedEgress)) -> Result<
             drop(child_sock);
             let listener = recv_fd(parent_sock.as_raw_fd()).context("receive listener fd")?;
             let mut blocked = Vec::new();
-            seccomp::supervise(listener.as_raw_fd(), &cfg.allow, |b| {
-                on_block(&b);
-                blocked.push(b);
+            let mut chains = Vec::new();
+            let mut detector = cfg
+                .detect_chain
+                .then(|| ChainDetector::new(cfg.chain_window_ms));
+            seccomp::supervise(listener.as_raw_fd(), &cfg.allow, detector.as_mut(), |ev| {
+                on_event(&ev);
+                match ev {
+                    SupervisorEvent::Blocked(b) => blocked.push(b),
+                    SupervisorEvent::Chain(c) => chains.push(c),
+                }
             })?;
             let exit_code = reap(child)?;
-            Ok(RunOutcome { exit_code, blocked })
+            Ok(RunOutcome {
+                exit_code,
+                blocked,
+                chains,
+            })
         }
     }
 }
@@ -80,7 +97,7 @@ fn child_main(cfg: &RunConfig, child_sock: OwnedFd) -> ! {
         }
     }
 
-    let listener = match seccomp::install_notify_filter() {
+    let listener = match seccomp::install_notify_filter(cfg.detect_chain) {
         Ok(fd) => fd,
         Err(e) => {
             eprintln!("embargo-sandbox: seccomp install failed: {e}");

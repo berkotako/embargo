@@ -10,10 +10,12 @@
 //! raw syscall/ioctl against a stable kernel ABI and carries a justification.
 
 use crate::allowlist::{self, Allowlist, Decision};
+use crate::chain::{self, ChainDetection, ChainDetector, EventKind, RuntimeEvent};
 use anyhow::{bail, Context, Result};
 use std::io::IoSliceMut;
 use std::net::SocketAddr;
 use std::os::fd::RawFd;
+use std::time::Instant;
 
 // ---- ABI constants (linux/seccomp.h, linux/filter.h, linux/audit.h) --------
 
@@ -29,6 +31,7 @@ const SECCOMP_RET_KILL_PROCESS: u32 = 0x8000_0000;
 
 const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
 const NR_CONNECT_X86_64: u32 = 42;
+const NR_OPENAT_X86_64: u32 = 257;
 
 // Classic BPF opcodes.
 const BPF_LD_W_ABS: u16 = 0x20;
@@ -39,20 +42,38 @@ const BPF_RET_K: u16 = 0x06;
 const SD_NR_OFF: u32 = 0;
 const SD_ARCH_OFF: u32 = 4;
 
-/// Build the connect()-notify seccomp program. Pure — unit-testable.
-pub fn build_connect_notify_program() -> Vec<libc::sock_filter> {
+/// Build the notify seccomp program. `notify_openat` adds openat() to the set
+/// of syscalls forwarded to the supervisor (for runtime secret-read detection).
+/// Pure — unit-testable.
+pub fn build_notify_program(notify_openat: bool) -> Vec<libc::sock_filter> {
+    if !notify_openat {
+        // 0: load arch
+        // 1: if arch != x86_64 -> KILL (idx 6)
+        // 2: load nr
+        // 3: if nr != connect -> ALLOW (idx 5)
+        // 4: USER_NOTIF / 5: ALLOW / 6: KILL
+        return vec![
+            stmt(BPF_LD_W_ABS, SD_ARCH_OFF),
+            jump(BPF_JEQ_K, AUDIT_ARCH_X86_64, 0, 4),
+            stmt(BPF_LD_W_ABS, SD_NR_OFF),
+            jump(BPF_JEQ_K, NR_CONNECT_X86_64, 0, 1),
+            stmt(BPF_RET_K, SECCOMP_RET_USER_NOTIF),
+            stmt(BPF_RET_K, SECCOMP_RET_ALLOW),
+            stmt(BPF_RET_K, SECCOMP_RET_KILL_PROCESS),
+        ];
+    }
     // 0: load arch
-    // 1: if arch != x86_64 -> KILL (idx 6)
+    // 1: if arch != x86_64 -> KILL (idx 7)
     // 2: load nr
-    // 3: if nr != connect -> ALLOW (idx 5)
-    // 4: USER_NOTIF
-    // 5: ALLOW
-    // 6: KILL
+    // 3: if nr == connect -> USER_NOTIF (idx 5)
+    // 4: if nr == openat  -> USER_NOTIF (idx 5) else ALLOW (idx 6)
+    // 5: USER_NOTIF / 6: ALLOW / 7: KILL
     vec![
         stmt(BPF_LD_W_ABS, SD_ARCH_OFF),
-        jump(BPF_JEQ_K, AUDIT_ARCH_X86_64, 0, 4),
+        jump(BPF_JEQ_K, AUDIT_ARCH_X86_64, 0, 5),
         stmt(BPF_LD_W_ABS, SD_NR_OFF),
-        jump(BPF_JEQ_K, NR_CONNECT_X86_64, 0, 1),
+        jump(BPF_JEQ_K, NR_CONNECT_X86_64, 1, 0),
+        jump(BPF_JEQ_K, NR_OPENAT_X86_64, 0, 1),
         stmt(BPF_RET_K, SECCOMP_RET_USER_NOTIF),
         stmt(BPF_RET_K, SECCOMP_RET_ALLOW),
         stmt(BPF_RET_K, SECCOMP_RET_KILL_PROCESS),
@@ -73,7 +94,8 @@ fn jump(code: u16, k: u32, jt: u8, jf: u8) -> libc::sock_filter {
 
 /// Install the filter and return the user-notification listener fd.
 /// Caller must already hold CAP_SYS_ADMIN (e.g. inside a user namespace).
-pub fn install_notify_filter() -> Result<RawFd> {
+/// `notify_openat` also forwards openat() for runtime secret-read detection.
+pub fn install_notify_filter(notify_openat: bool) -> Result<RawFd> {
     // no_new_privs lets an unprivileged-in-userns process install a filter.
     // SAFETY: prctl with PR_SET_NO_NEW_PRIVS takes scalar args; no pointers.
     let rc = unsafe { libc::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
@@ -81,7 +103,7 @@ pub fn install_notify_filter() -> Result<RawFd> {
         return Err(std::io::Error::last_os_error()).context("prctl(NO_NEW_PRIVS)");
     }
 
-    let prog = build_connect_notify_program();
+    let prog = build_notify_program(notify_openat);
     let fprog = libc::sock_fprog {
         len: prog.len() as u16,
         filter: prog.as_ptr() as *mut libc::sock_filter,
@@ -207,22 +229,37 @@ pub struct BlockedEgress {
     pub dest: SocketAddr,
 }
 
-/// Run the supervisor loop on `listener`, enforcing `allow`. Calls `on_block`
-/// for each blocked destination. Returns when the listener reports the target
-/// has exited (RECV fails). `on_block` lets the caller emit a ReportEvent.
+/// What the supervisor surfaces to the caller.
+pub enum SupervisorEvent {
+    /// A non-allowlisted egress was blocked with EPERM.
+    Blocked(BlockedEgress),
+    /// A runtime compromise chain completed (secret read → non-allowlisted egress).
+    Chain(ChainDetection),
+}
+
+const NR_CONNECT: i32 = NR_CONNECT_X86_64 as i32;
+const NR_OPENAT: i32 = NR_OPENAT_X86_64 as i32;
+
+/// Run the supervisor loop on `listener`, enforcing `allow`. When `chain` is
+/// Some, openat() is also observed (the filter must have been installed with
+/// `notify_openat = true`) and the detector correlates secret-read → egress.
+/// `on_event` receives blocked egresses and chain detections. Returns when the
+/// target has exited (RECV fails).
 pub fn supervise(
     listener: RawFd,
     allow: &Allowlist,
-    mut on_block: impl FnMut(BlockedEgress),
+    mut chain: Option<&mut ChainDetector>,
+    mut on_event: impl FnMut(SupervisorEvent),
 ) -> Result<()> {
     let recv = ioctl_recv();
     let send = ioctl_send();
     let id_valid = ioctl_id_valid();
+    let start = Instant::now();
 
     loop {
         let mut notif: SeccompNotif = unsafe { std::mem::zeroed() };
-        // SAFETY: NOTIF_RECV blocks until a connect() is pending or the target
-        // dies; it fills `notif`. A negative return ends the loop.
+        // SAFETY: NOTIF_RECV blocks until a syscall is pending or the target
+        // dies; it fills `notif`. A nonzero return ends or retries the loop.
         let rc = unsafe { libc::ioctl(listener, recv, &mut notif as *mut SeccompNotif) };
         if rc != 0 {
             let err = std::io::Error::last_os_error();
@@ -234,33 +271,69 @@ pub fn supervise(
             }
         }
 
-        let dest = read_dest(notif.pid, &notif.data);
-
-        // Re-validate the notification id before acting on memory we read, to
-        // avoid a pid-reuse race (kernel-recommended pattern).
-        // SAFETY: NOTIF_ID_VALID reads one u64 id; returns 0 if still valid.
-        let still_valid = unsafe { libc::ioctl(listener, id_valid, &notif.id as *const u64) } == 0;
-        if !still_valid {
-            continue;
-        }
-
+        let at_ms = start.elapsed().as_millis() as u64;
         let mut resp = SeccompNotifResp {
             id: notif.id,
             ..Default::default()
         };
-        match allowlist::decide(allow, dest) {
-            Decision::Allow => {
-                // Let the real connect() proceed in the target.
-                resp.flags = SECCOMP_USER_NOTIF_FLAG_CONTINUE;
-            }
-            Decision::Block => {
-                resp.error = -libc::EPERM;
-                if let Some(d) = dest {
-                    on_block(BlockedEgress {
-                        pid: notif.pid,
-                        dest: d,
-                    });
+
+        match notif.data.nr {
+            NR_CONNECT => {
+                let dest = read_dest(notif.pid, &notif.data);
+                // Validate the id before trusting the memory we read.
+                // SAFETY: NOTIF_ID_VALID reads one u64; 0 = still valid.
+                if unsafe { libc::ioctl(listener, id_valid, &notif.id as *const u64) } != 0 {
+                    continue;
                 }
+                let decision = allowlist::decide(allow, dest);
+                match decision {
+                    Decision::Allow => resp.flags = SECCOMP_USER_NOTIF_FLAG_CONTINUE,
+                    Decision::Block => {
+                        resp.error = -libc::EPERM;
+                        if let Some(d) = dest {
+                            on_event(SupervisorEvent::Blocked(BlockedEgress {
+                                pid: notif.pid,
+                                dest: d,
+                            }));
+                        }
+                    }
+                }
+                if let (Some(det), Some(d)) = (chain.as_deref_mut(), dest) {
+                    let ev = RuntimeEvent {
+                        pid: notif.pid,
+                        at_ms,
+                        kind: EventKind::Egress {
+                            dest: d,
+                            allowlisted: decision == Decision::Allow,
+                        },
+                    };
+                    if let Some(hit) = det.observe(&ev) {
+                        on_event(SupervisorEvent::Chain(hit));
+                    }
+                }
+            }
+            NR_OPENAT => {
+                // Observe-only: always allow the open; record secret reads.
+                let path = read_path(notif.pid, &notif.data);
+                // SAFETY: NOTIF_ID_VALID reads one u64; 0 = still valid.
+                if unsafe { libc::ioctl(listener, id_valid, &notif.id as *const u64) } != 0 {
+                    continue;
+                }
+                resp.flags = SECCOMP_USER_NOTIF_FLAG_CONTINUE;
+                if let (Some(det), Some(p)) = (chain.as_deref_mut(), path) {
+                    if chain::is_secret_path(&p) {
+                        let ev = RuntimeEvent {
+                            pid: notif.pid,
+                            at_ms,
+                            kind: EventKind::SecretRead { path: p },
+                        };
+                        let _ = det.observe(&ev); // a read alone never completes a chain
+                    }
+                }
+            }
+            _ => {
+                // The filter only notifies connect/openat; allow anything else.
+                resp.flags = SECCOMP_USER_NOTIF_FLAG_CONTINUE;
             }
         }
 
@@ -275,6 +348,31 @@ pub fn supervise(
             return Err(err).context("NOTIF_SEND");
         }
     }
+}
+
+/// Read the openat() pathname (a C string at args[1]) from the target's memory.
+fn read_path(pid: u32, data: &SeccompData) -> Option<String> {
+    let ptr = data.args[1] as usize;
+    if ptr == 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; 256];
+    let read = {
+        let local = IoSliceMut::new(&mut buf);
+        let remote = nix::sys::uio::RemoteIoVec {
+            base: ptr,
+            len: 256,
+        };
+        nix::sys::uio::process_vm_readv(
+            nix::unistd::Pid::from_raw(pid as i32),
+            &mut [local],
+            &[remote],
+        )
+        .ok()?
+    };
+    let bytes = &buf[..read];
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
 }
 
 /// Read and parse the `connect()` destination sockaddr from the target's memory.
@@ -332,14 +430,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn program_has_expected_shape() {
-        let p = build_connect_notify_program();
+    fn connect_only_program_has_expected_shape() {
+        let p = build_notify_program(false);
         assert_eq!(p.len(), 7);
-        // last three are RET statements
         assert_eq!(p[4].code, BPF_RET_K);
         assert_eq!(p[4].k, SECCOMP_RET_USER_NOTIF);
         assert_eq!(p[5].k, SECCOMP_RET_ALLOW);
         assert_eq!(p[6].k, SECCOMP_RET_KILL_PROCESS);
+    }
+
+    #[test]
+    fn openat_program_adds_a_branch() {
+        let p = build_notify_program(true);
+        assert_eq!(p.len(), 8);
+        // connect → USER_NOTIF, openat → USER_NOTIF, else ALLOW.
+        assert_eq!(p[5].k, SECCOMP_RET_USER_NOTIF);
+        assert_eq!(p[6].k, SECCOMP_RET_ALLOW);
+        assert_eq!(p[7].k, SECCOMP_RET_KILL_PROCESS);
     }
 
     #[test]

@@ -32,14 +32,36 @@ embargo-sandbox run \
 A phoning-home `postinstall` is therefore blocked and recorded, while the
 install still completes against the allowlisted registry.
 
+## Runtime compromise-chain detection (M4)
+
+With `--detect-chain`, the supervisor also observes `openat()` and correlates
+per process: a **secret read → non-allowlisted egress** within a time window is
+the stealer chain. "A single syscall has no intent; the chain does." A detected
+chain is reported as an `ebpf_chain` event (engine signal
+`EbpfCompromiseChain`, weight 100 — the highest-confidence containment finding).
+
+```bash
+embargo-sandbox run --allow 10.0.0.5 --detect-chain \
+  --package left-pad --version 1.0.0 --engine embargo-engine:50051 \
+  -- npm ci
+```
+
+The correlation engine (`chain.rs`) is pure and source-agnostic. Today the data
+source is the seccomp supervisor (observing every `openat()`, so this mode is
+heavier than plain egress control). In production the same engine is fed by an
+**eBPF** ring buffer for lower-overhead, harder-to-forge visibility — that path
+requires kernel BTF + `CAP_BPF`/`CAP_PERFMON` and is the M4+ data source; the
+correlation logic is unchanged.
+
 ## Architecture
 
 | Module | Responsibility | `unsafe`? |
 |---|---|---|
 | `allowlist.rs` | parse a raw sockaddr, decide allow/block | no — pure, unit-tested |
-| `seccomp.rs` | build the BPF filter, install the listener, run the user-notify loop | yes — confined raw syscalls/ioctls, each justified |
+| `chain.rs` | correlate runtime events → compromise-chain detection | no — pure, unit-tested |
+| `seccomp.rs` | build the BPF filter, install the listener, run the user-notify loop (connect + openat) | yes — confined raw syscalls/ioctls, each justified |
 | `runner.rs` | fork, enter namespaces, pass the fd, exec, reap | yes — fork/exec |
-| `report.rs` | `engine.ReportEvent` gRPC client | no |
+| `report.rs` | `engine.ReportEvent` gRPC client (egress + chain) | no |
 
 This is the only crate permitted `unsafe` (per `CLAUDE.md`); every `unsafe`
 block carries a justifying comment.
@@ -65,6 +87,7 @@ external one was blocked + captured and loopback was allowed.
 
 ## Roadmap
 
-- **M3 (this):** namespaced install runner + seccomp egress allowlist + capture + `ReportEvent`.
-- **M4:** eBPF runtime chain detection (secret/env read → serialize → egress to a
-  non-allowlisted host), via `aya`. A single syscall has no intent; the chain does.
+- **M3:** namespaced install runner + seccomp egress allowlist + capture + `ReportEvent`. ✅
+- **M4:** runtime compromise-chain detection (secret read → non-allowlisted egress),
+  correlation engine + seccomp data source. ✅ eBPF/`aya` data source (lower
+  overhead, requires BTF + `CAP_BPF`) is the production follow-up — same engine.

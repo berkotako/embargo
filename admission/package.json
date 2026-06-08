@@ -1,6 +1,7 @@
 {
   "name": "@embargo/admission",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "description": "Embargo L2 Admission Control — CI lockfile-diff gate that calls the engine",
   "main": "dist/index.js",

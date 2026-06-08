@@ -172,10 +172,15 @@ production deployment is in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ## License
 
-TBD (open-core intended: gateway/engine/signals/console/CI-gate open; multi-tenancy, SSO/RBAC, and
-compliance reporting as the enterprise tier).
+[MIT](LICENSE) © 2026 berkotako. The whole stack — engine, gateway, signals,
+console, and CI gate — is open source: use it, fork it, ship it.
 
 ## Not a
 
 SCA/CVE scanner (pair it with Grype/Trivy) or a runtime EDR. Embargo is a resolution-time gate plus
 install-time containment.
+
+## Support
+
+Embargo is free and self-hosted. If it saved you from a bad install and you'd like to say thanks,
+you can [**buy me a coffee** ☕](https://www.paypal.com/pool/9pSP95O3Zn?sr=wccr).

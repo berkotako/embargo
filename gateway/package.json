@@ -1,6 +1,7 @@
 {
   "name": "@embargo/gateway",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "description": "Embargo L1 Ingress Gateway — Verdaccio plugin for packument rewriting",
   "main": "dist/index.js",

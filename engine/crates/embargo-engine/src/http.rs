@@ -5,8 +5,9 @@
 //! `EngineState`. Responses are shaped (camelCase) to match the console's
 //! TypeScript domain types exactly.
 //!
-//! AuthN: an optional bearer token (`admin_token`) gates writes/reads in dev.
-//! OIDC SSO + server-side RBAC is the production path; this is the seam.
+//! AuthN/AuthZ: every endpoint runs the `AuthUser` extractor (see `auth.rs`)
+//! and enforces RBAC server-side — reads need a viewer, approval writes need a
+//! responder, and the audit log records the real principal.
 
 use axum::{
     extract::{Query, State},
@@ -19,9 +20,31 @@ use embargo_core::policy::OnHardSignal;
 use embargo_core::types::{HoldReason, Provenance, Signal, Verdict, VersionVerdict};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use uuid::Uuid;
 
+use crate::auth::{AuthUser, Permission};
 use crate::db;
 use crate::grpc::EngineState;
+
+/// Enforce a permission for the authenticated principal (server-side RBAC).
+fn require(user: &AuthUser, p: Permission) -> Result<(), ApiError> {
+    if user.role.can(p) {
+        Ok(())
+    } else {
+        Err(ApiError(
+            StatusCode::FORBIDDEN,
+            format!(
+                "role '{}' lacks the required permission",
+                user.role.as_str()
+            ),
+        ))
+    }
+}
+
+/// Stable UUID for an OIDC subject (sub strings aren't UUIDs).
+fn user_uuid(sub: &str) -> Uuid {
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, sub.as_bytes())
+}
 
 pub fn router(state: EngineState) -> Router {
     Router::new()
@@ -185,8 +208,10 @@ struct VerdictQuery {
 
 async fn list_verdicts(
     State(state): State<EngineState>,
+    user: AuthUser,
     Query(q): Query<VerdictQuery>,
 ) -> ApiResult<Vec<VerdictDto>> {
+    require(&user, Permission::ReadVerdicts)?;
     let filter = match q.verdict.as_deref() {
         Some("deny") => Verdict::Deny,
         _ => Verdict::Hold,
@@ -208,7 +233,11 @@ struct PolicyRuleDto {
     specificity: u32,
 }
 
-async fn get_policies(State(state): State<EngineState>) -> ApiResult<Vec<PolicyRuleDto>> {
+async fn get_policies(
+    State(state): State<EngineState>,
+    user: AuthUser,
+) -> ApiResult<Vec<PolicyRuleDto>> {
+    require(&user, Permission::ReadPolicies)?;
     let ruleset = db::policies::get_active(&state.pool).await?;
     let rules = ruleset.map(|r| r.rules).unwrap_or_default();
     let dto = rules
@@ -240,7 +269,8 @@ struct DryRunDto {
     affected_pkgs: Vec<String>,
 }
 
-async fn get_dryrun(State(state): State<EngineState>) -> ApiResult<DryRunDto> {
+async fn get_dryrun(State(state): State<EngineState>, user: AuthUser) -> ApiResult<DryRunDto> {
+    require(&user, Permission::ReadPolicies)?;
     let (total, blocked) = db::stats::dryrun(&state.pool).await?;
     Ok(Json(DryRunDto {
         total,
@@ -264,7 +294,11 @@ struct ApprovalDto {
     created_at: String,
 }
 
-async fn list_approvals(State(state): State<EngineState>) -> ApiResult<Vec<ApprovalDto>> {
+async fn list_approvals(
+    State(state): State<EngineState>,
+    user: AuthUser,
+) -> ApiResult<Vec<ApprovalDto>> {
+    require(&user, Permission::ReadApprovals)?;
     let rows = db::approvals::list(&state.pool, 200).await?;
     let dto = rows
         .into_iter()
@@ -294,27 +328,33 @@ struct CreateApprovalBody {
 
 async fn create_approval(
     State(state): State<EngineState>,
+    user: AuthUser,
     Json(body): Json<CreateApprovalBody>,
 ) -> ApiResult<ApprovalDto> {
-    // TODO(prod): actor from the OIDC session; requires 'approve' permission.
-    let actor = uuid::Uuid::nil();
+    require(&user, Permission::WriteApprovals)?;
+    // The requester and approver is the authenticated principal.
+    let actor_id = user_uuid(&user.sub);
     let a = db::approvals::create(
         &state.pool,
         &body.package,
         &body.version,
-        actor,
-        actor,
+        actor_id,
+        actor_id,
         &body.justification,
         body.ttl_hours,
     )
     .await?;
     db::audit::append(
         &state.pool,
-        &embargo_core::audit::Actor::System,
+        &embargo_core::audit::Actor::User {
+            id: actor_id,
+            email: user.email.clone(),
+            role: user.role.as_str().into(),
+        },
         embargo_core::audit::AuditAction::ApprovalGranted,
         &embargo_core::audit::AuditTarget::Approval { id: a.id },
         None,
-        None,
+        Some(&json!({ "package": body.package, "version": body.version })),
     )
     .await?;
     Ok(Json(ApprovalDto {
@@ -337,15 +377,30 @@ struct RevokeBody {
 
 async fn revoke_approval(
     State(state): State<EngineState>,
+    user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<RevokeBody>,
 ) -> Result<StatusCode, ApiError> {
+    require(&user, Permission::WriteApprovals)?;
     let uuid = uuid::Uuid::parse_str(&id)
         .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid approval id".into()))?;
     db::approvals::revoke(
         &state.pool,
         uuid,
         body.reason.as_deref().unwrap_or("revoked via console"),
+    )
+    .await?;
+    db::audit::append(
+        &state.pool,
+        &embargo_core::audit::Actor::User {
+            id: user_uuid(&user.sub),
+            email: user.email.clone(),
+            role: user.role.as_str().into(),
+        },
+        embargo_core::audit::AuditAction::ApprovalRevoked,
+        &embargo_core::audit::AuditTarget::Approval { id: uuid },
+        None,
+        None,
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -365,7 +420,8 @@ struct AuditDto {
     content_hash: String,
 }
 
-async fn list_audit(State(state): State<EngineState>) -> ApiResult<Vec<AuditDto>> {
+async fn list_audit(State(state): State<EngineState>, user: AuthUser) -> ApiResult<Vec<AuditDto>> {
+    require(&user, Permission::ReadAudit)?;
     let rows = db::audit::list(&state.pool, 200).await?;
     let dto = rows
         .into_iter()
@@ -419,7 +475,11 @@ struct TopSignalDto {
     share: f64,
 }
 
-async fn get_dashboard(State(state): State<EngineState>) -> ApiResult<DashboardDto> {
+async fn get_dashboard(
+    State(state): State<EngineState>,
+    user: AuthUser,
+) -> ApiResult<DashboardDto> {
+    require(&user, Permission::ReadVerdicts)?;
     let d = db::stats::dashboard(&state.pool).await?;
     let total_signals: i64 = d.top_signals.iter().map(|(_, n)| *n).sum();
     let top_signals = d
@@ -487,6 +547,10 @@ rules:
 "#;
 
     async fn test_state() -> EngineState {
+        test_state_auth(std::sync::Arc::new(crate::auth::AuthState::disabled())).await
+    }
+
+    async fn test_state_auth(auth: std::sync::Arc<crate::auth::AuthState>) -> EngineState {
         use sqlx::postgres::PgPoolOptions;
         let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
         let redis_url =
@@ -531,6 +595,7 @@ rules:
             admin_http_addr: "[::]:0".into(),
             upstream_registry: "https://registry.npmjs.org".into(),
             osv_endpoint: "https://api.osv.dev".into(),
+            auth: crate::config::AuthConfig::default(),
         };
         EngineState::new(
             pool,
@@ -538,6 +603,7 @@ rules:
             cfg,
             std::sync::Arc::new(crate::registry::MockRegistryClient::default()),
             std::sync::Arc::new(crate::advisory::MockAdvisoryClient::default()),
+            auth,
         )
     }
 
@@ -607,5 +673,93 @@ rules:
 
         let list = get_json(state, "/api/approvals").await;
         assert!(list.as_array().unwrap().iter().any(|a| a["package"] == pkg));
+    }
+
+    async fn dev_state() -> EngineState {
+        let auth = crate::auth::AuthState::build(&crate::config::AuthConfig {
+            mode: "dev".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        test_state_auth(std::sync::Arc::new(auth)).await
+    }
+
+    fn req_role(method: &str, uri: &str, role: &str, body: Option<&str>) -> Request<Body> {
+        let mut b = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("x-embargo-role", role)
+            .header("x-embargo-email", "u@x.com");
+        if body.is_some() {
+            b = b.header("content-type", "application/json");
+        }
+        b.body(
+            body.map(|s| Body::from(s.to_string()))
+                .unwrap_or_else(Body::empty),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn rbac_viewer_can_read_but_not_approve() {
+        let state = dev_state().await;
+
+        // viewer GET → 200
+        let r = router(state.clone())
+            .oneshot(req_role("GET", "/api/policies", "viewer", None))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK, "viewer may read policies");
+
+        // viewer POST approval → 403
+        let body = r#"{"package":"p","version":"1.0.0","justification":"x","ttlHours":24}"#;
+        let r = router(state)
+            .oneshot(req_role("POST", "/api/approvals", "viewer", Some(body)))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::FORBIDDEN, "viewer may not approve");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn rbac_responder_can_approve() {
+        let state = dev_state().await;
+        let pkg = format!("rbac-{}", uuid::Uuid::new_v4());
+        let body =
+            format!(r#"{{"package":"{pkg}","version":"1.0.0","justification":"x","ttlHours":24}}"#);
+        let r = router(state)
+            .oneshot(req_role("POST", "/api/approvals", "responder", Some(&body)))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK, "responder may approve");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn oidc_mode_rejects_missing_token() {
+        let auth = crate::auth::AuthState::build(&crate::config::AuthConfig {
+            mode: "oidc".into(),
+            jwks_inline: r#"{"keys":[{"kty":"RSA","kid":"test-kid","e":"AQAB","n":"1NuP6rdcQsBc6YnR_leFX3YWDtpNnSXxnIcHHhCz5jGIeSNYVbi_mn49voRJoYgBkKAccYM_rdhDkpy-BehWhkrblKi8SLyxL9XANIIeJloZGey08WsxevnxiYKt-a33XD5JAoS6_uRS6ozKEiUuH6gOuWpQlJUAiMiBfbgcrpjIhpPuavfReczvuEikinm_nphp5T0ibiJpsIE3wOdE19Z0Knn-bSOGM3wZk677tivVNSfCYcVo-nZfpA9kmoD0L_GKKcD3ggkhEMD_sODoRxiDDYvta4_C8ZhTuca08qd5qjfUjYkKG6d07pdN2bieP9nW1cUOMmuuRNSwnJ4bZQ"}]}"#.into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        let state = test_state_auth(std::sync::Arc::new(auth)).await;
+        let r = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/policies")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r.status(),
+            StatusCode::UNAUTHORIZED,
+            "oidc requires a token"
+        );
     }
 }

@@ -55,5 +55,8 @@ tar = "0.4"
 async-trait = "0.1"
 base64 = "0.22"
 
+# OIDC / JWT verification for the admin facade
+jsonwebtoken = "9"
+
 [build-dependencies]
 tonic-build = { workspace = true }

@@ -55,7 +55,7 @@ prometheus = { version = "0.13", features = ["process"] }
 
 # time
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
 # config
 config = "0.15"

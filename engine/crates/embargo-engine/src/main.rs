@@ -1,4 +1,5 @@
 mod advisory;
+mod auth;
 mod cache;
 mod config;
 mod db;
@@ -41,7 +42,15 @@ async fn main() -> Result<()> {
         cfg.upstream_registry.clone(),
     )?);
     let advisory = std::sync::Arc::new(advisory::OsvClient::new(cfg.osv_endpoint.clone())?);
-    let engine = grpc::EngineState::new(pool, redis, cfg.clone(), registry, advisory);
+
+    let auth = std::sync::Arc::new(auth::AuthState::build(&cfg.auth).await?);
+    if auth.mode == auth::Mode::Disabled {
+        tracing::warn!(
+            "admin facade auth is DISABLED — every request is treated as admin. \
+             Set auth.mode=oidc for any real deployment."
+        );
+    }
+    let engine = grpc::EngineState::new(pool, redis, cfg.clone(), registry, advisory, auth);
 
     // JSON admin facade for the console (separate port from gRPC + metrics).
     let admin_server = {

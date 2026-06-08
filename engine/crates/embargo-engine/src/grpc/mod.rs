@@ -8,6 +8,7 @@ use tokio::task::JoinHandle;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 
 use crate::advisory::AdvisoryClient;
+use crate::auth::AuthState;
 use crate::config::Config;
 use crate::registry::RegistryClient;
 
@@ -21,6 +22,8 @@ pub struct EngineState {
     pub registry: Arc<dyn RegistryClient>,
     /// Advisory feed (OSV) client used by the extractor for advisory matching.
     pub advisory: Arc<dyn AdvisoryClient>,
+    /// Admin facade authentication + RBAC state.
+    pub auth: Arc<AuthState>,
 }
 
 impl EngineState {
@@ -30,6 +33,7 @@ impl EngineState {
         config: Config,
         registry: Arc<dyn RegistryClient>,
         advisory: Arc<dyn AdvisoryClient>,
+        auth: Arc<AuthState>,
     ) -> Self {
         Self {
             pool,
@@ -37,6 +41,7 @@ impl EngineState {
             config,
             registry,
             advisory,
+            auth,
         }
     }
 }

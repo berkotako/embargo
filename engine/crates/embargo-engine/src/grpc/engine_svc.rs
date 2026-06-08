@@ -358,9 +358,17 @@ rules:
             admin_http_addr: "[::]:0".into(),
             upstream_registry: "https://registry.npmjs.org".into(),
             osv_endpoint: "https://api.osv.dev".into(),
+            auth: crate::config::AuthConfig::default(),
         };
 
-        EngineState::new(pool, redis, config, registry, advisory)
+        EngineState::new(
+            pool,
+            redis,
+            config,
+            registry,
+            advisory,
+            std::sync::Arc::new(crate::auth::AuthState::disabled()),
+        )
     }
 
     /// State with a custom registry and a clean (no-match) advisory feed.

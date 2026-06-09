@@ -124,6 +124,18 @@ impl EngineService for EngineServiceImpl {
     }
 }
 
+/// Synthesize a hard-deny signal for a known-malicious feed match.
+fn known_malicious_signal(source: &str) -> embargo_core::types::Signal {
+    embargo_core::types::Signal {
+        id: uuid::Uuid::new_v4(),
+        signal_type: embargo_core::types::SignalType::KnownMalicious,
+        severity: embargo_core::types::Severity::Critical,
+        weight: 100,
+        evidence: serde_json::json!({ "source": source }),
+        detected_at: Utc::now(),
+    }
+}
+
 async fn resolve_one(
     state: &EngineState,
     package: &str,
@@ -160,8 +172,14 @@ async fn resolve_one(
         .unwrap_or_else(|| Utc::now() - chrono::Duration::hours(rule.cooldown_hours as i64 + 1));
 
     // Signals and provenance are produced out-of-band by the extractor.
-    let signals = db::signals::get_for_version(&state.pool, package, version).await?;
+    let mut signals = db::signals::get_for_version(&state.pool, package, version).await?;
     let provenance = db::provenance::get(&state.pool, package, version).await?;
+
+    // Known-malicious feed: a hot-path lookup so a listed version is DENY'd on
+    // the first resolve, without waiting for background extraction.
+    if let Some(source) = db::known_malicious::is_malicious(&state.pool, package, version).await? {
+        signals.push(known_malicious_signal(&source));
+    }
 
     let input = ResolutionInput {
         package,
@@ -360,6 +378,7 @@ rules:
             osv_endpoint: "https://api.osv.dev".into(),
             bootstrap_policy_path: String::new(),
             auth: crate::config::AuthConfig::default(),
+            known_malicious_feed: crate::config::KnownMaliciousFeedConfig::default(),
         };
 
         EngineState::new(
@@ -397,6 +416,33 @@ rules:
 
     fn unique(prefix: &str) -> String {
         format!("itest-{prefix}-{}", Uuid::new_v4())
+    }
+
+    /// A known-malicious feed match DENYs on resolve even when the version is
+    /// aged past cooldown with no other signals (would otherwise ALLOW).
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn known_malicious_feed_denies_on_resolve() {
+        let state = test_state().await;
+        let pkg = unique("km");
+        let ver = "1.0.0";
+        let source = format!("itest-{pkg}");
+        crate::db::known_malicious::replace_source(
+            &state.pool,
+            &source,
+            &[(pkg.clone(), ver.to_string())],
+        )
+        .await
+        .unwrap();
+
+        let r = resolve_one(&state, &pkg, ver, ts_hours_ago(500))
+            .await
+            .unwrap();
+        assert_eq!(
+            r.verdict,
+            ProtoVerdict::Deny as i32,
+            "known-malicious feed match must DENY"
+        );
     }
 
     #[tokio::test]

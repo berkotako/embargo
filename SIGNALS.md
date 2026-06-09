@@ -45,6 +45,7 @@ Weights are starting points — tune on real traffic. `H` = high, `M` = medium, 
 | `maintainer_change` | new publisher / geo / token | registry metadata | M |
 | `tarball_repo_mismatch` | published artifact ≠ source repo | provenance + repo diff | H |
 | `advisory_match` | OSV / GitHub Advisory hit during cooldown | external feeds | DENY |
+| `known_malicious` | package@version listed in a curated malicious-package feed (e.g. Datadog dataset) | external feed | DENY |
 | `sandbox_egress_attempt` | install tried to reach non-allowlisted host | L3 containment | H |
 | `obfuscation_markers` | high-entropy/packed payload; known stealer patterns | static scan | M |
 | `typosquat` | package name is a near-miss of a popular one (edit-distance / separator / homoglyph) | name vs. bundled popular-name corpus | M |

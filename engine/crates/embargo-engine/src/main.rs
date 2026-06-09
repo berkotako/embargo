@@ -4,6 +4,7 @@ mod cache;
 mod config;
 mod db;
 mod extractor;
+mod feeds;
 mod generated;
 mod grpc;
 mod http;
@@ -91,6 +92,8 @@ async fn main() -> Result<()> {
 
     // Background watchlist tracker (detached daemon over db::watchlist).
     let _tracker = tracker::spawn(engine.clone());
+    // Known-malicious feed sync (opt-in; no-op when disabled).
+    let _feed = feeds::spawn(engine.clone());
 
     let grpc_server = grpc::serve(engine, &cfg).await?;
 

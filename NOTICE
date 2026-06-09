@@ -1,0 +1,11 @@
+Embargo
+Copyright (c) 2026 berkotako
+
+This product can optionally ingest data from third-party datasets:
+
+- Datadog "malicious-software-packages-dataset"
+  https://github.com/DataDog/malicious-software-packages-dataset
+  Licensed under the Apache License, Version 2.0.
+  Used by the optional known-malicious feed (disabled by default). Only the
+  package/version manifest is consumed at runtime; no dataset contents are
+  redistributed in this repository.

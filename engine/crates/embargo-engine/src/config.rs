@@ -21,6 +21,47 @@ pub struct Config {
     /// Admin facade authentication.
     #[serde(default)]
     pub auth: AuthConfig,
+    /// Known-malicious package feed (opt-in).
+    #[serde(default)]
+    pub known_malicious_feed: KnownMaliciousFeedConfig,
+}
+
+/// External known-malicious package feed. Default URL is Datadog's
+/// malicious-software-packages-dataset npm manifest (Apache-2.0; see NOTICE).
+#[derive(Debug, Clone, Deserialize)]
+pub struct KnownMaliciousFeedConfig {
+    /// Disabled by default — operators opt in.
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_km_url")]
+    pub url: String,
+    /// Logical source name recorded on each entry.
+    #[serde(default = "default_km_source")]
+    pub source: String,
+    /// Re-sync cadence in seconds (default 6h).
+    #[serde(default = "default_km_interval")]
+    pub interval_secs: u64,
+}
+
+fn default_km_url() -> String {
+    "https://raw.githubusercontent.com/DataDog/malicious-software-packages-dataset/main/samples/npm/manifest.json".into()
+}
+fn default_km_source() -> String {
+    "datadog".into()
+}
+fn default_km_interval() -> u64 {
+    21_600
+}
+
+impl Default for KnownMaliciousFeedConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: default_km_url(),
+            source: default_km_source(),
+            interval_secs: default_km_interval(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

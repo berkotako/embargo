@@ -38,6 +38,8 @@ pub enum HoldReason {
     SignalChain { chain_id: String, score: u32 },
     /// Direct advisory/CVE match — always DENY.
     Advisory { advisory_id: String },
+    /// Listed in a known-malicious feed (e.g. Datadog dataset) — always DENY.
+    KnownMalicious { source: String },
     /// Manually denied by an operator.
     ManualDeny { approver: String, reason: String },
     /// Overridden to ALLOW by a time-boxed, audited approval (exception workflow).
@@ -99,6 +101,8 @@ pub enum SignalType {
     /// Package name is a near-miss of a popular one (typosquatting / impersonation).
     Typosquat,
     AdvisoryMatch,
+    /// Listed in a known-malicious package feed (curated dataset).
+    KnownMalicious,
     ProvenanceAbsent,
     SandboxEgressAttempt,
     /// eBPF chain: secret read → serialize → non-allowlisted egress.

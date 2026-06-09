@@ -57,6 +57,8 @@ pub fn compute_verdict(input: &ResolutionInput<'_>) -> VersionVerdict {
     }
 
     // --- Signal scoring ---
+    // Hard-deny feeds: an advisory or known-malicious match always DENYs,
+    // independent of cooldown/provenance, and is never released by fast-track.
     let has_advisory = input
         .signals
         .iter()
@@ -68,11 +70,33 @@ pub fn compute_verdict(input: &ResolutionInput<'_>) -> VersionVerdict {
         verdict = Verdict::Deny;
     }
 
-    // Non-advisory signals: sum weights, apply threshold.
+    if let Some(s) = input
+        .signals
+        .iter()
+        .find(|s| s.signal_type == SignalType::KnownMalicious)
+    {
+        reasons.push(HoldReason::KnownMalicious {
+            source: s
+                .evidence
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("feed")
+                .to_string(),
+        });
+        verdict = Verdict::Deny;
+    }
+
+    // Behavioral signals: sum weights, apply threshold. The hard-deny feed
+    // signals above are excluded — they don't contribute to the chain score.
     let chain_score: u32 = input
         .signals
         .iter()
-        .filter(|s| s.signal_type != SignalType::AdvisoryMatch)
+        .filter(|s| {
+            !matches!(
+                s.signal_type,
+                SignalType::AdvisoryMatch | SignalType::KnownMalicious
+            )
+        })
         .map(|s| s.weight)
         .sum();
 
@@ -177,6 +201,17 @@ mod tests {
         }
     }
 
+    fn known_malicious_signal() -> Signal {
+        Signal {
+            id: Uuid::new_v4(),
+            signal_type: SignalType::KnownMalicious,
+            severity: Severity::Critical,
+            weight: 100,
+            evidence: serde_json::json!({ "source": "datadog" }),
+            detected_at: Utc::now(),
+        }
+    }
+
     fn lifecycle_signal() -> Signal {
         Signal {
             id: Uuid::new_v4(),
@@ -240,6 +275,28 @@ mod tests {
         };
         let v = compute_verdict(&input);
         assert_eq!(v.verdict, Verdict::Deny);
+    }
+
+    #[test]
+    fn known_malicious_always_denies_even_fast_tracked() {
+        // A known-malicious feed match DENYs regardless of fast-track / on_hard_signal.
+        let rule = make_rule(0, false, OnHardSignal::Hold);
+        let input = ResolutionInput {
+            package: "evil-pkg",
+            version: "1.0.0",
+            published_at: old_package(),
+            provenance: None,
+            signals: &[known_malicious_signal()],
+            rule: &rule,
+            fast_tracked: true,
+            now: Utc::now(),
+        };
+        let v = compute_verdict(&input);
+        assert_eq!(v.verdict, Verdict::Deny);
+        assert!(matches!(
+            v.reasons[0],
+            HoldReason::KnownMalicious { ref source } if source == "datadog"
+        ));
     }
 
     #[test]

@@ -157,6 +157,7 @@ fn signal_type_str(s: &Signal) -> String {
         T::Obfuscation => "obfuscation".into(),
         T::Typosquat => "typosquat".into(),
         T::AdvisoryMatch => "advisory_match".into(),
+        T::KnownMalicious => "known_malicious".into(),
         T::ProvenanceAbsent => "provenance_absent".into(),
         T::SandboxEgressAttempt => "sandbox_egress_attempt".into(),
         T::EbpfCompromiseChain => "ebpf_compromise_chain".into(),
@@ -175,6 +176,7 @@ fn reason_str(r: &HoldReason) -> String {
             format!("signal chain {chain_id} (score {score})")
         }
         HoldReason::Advisory { advisory_id } => format!("advisory: {advisory_id}"),
+        HoldReason::KnownMalicious { source } => format!("known-malicious feed: {source}"),
         HoldReason::ManualDeny { reason, .. } => format!("manually denied: {reason}"),
         HoldReason::ApprovedException { reason, .. } => format!("approved exception: {reason}"),
     }
@@ -756,6 +758,7 @@ rules:
             osv_endpoint: "https://api.osv.dev".into(),
             bootstrap_policy_path: String::new(),
             auth: crate::config::AuthConfig::default(),
+            known_malicious_feed: crate::config::KnownMaliciousFeedConfig::default(),
         };
         EngineState::new(
             pool,

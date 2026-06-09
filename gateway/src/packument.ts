@@ -87,11 +87,12 @@ export function buildHeldError(
   version: string,
   reasons: string[],
   consoleBaseUrl: string,
+  verdict: 'HOLD' | 'DENY' = 'HOLD',
 ): HeldVersionError {
   return {
     package: pkg,
     version,
-    verdict: 'HOLD',
+    verdict,
     reasons,
     approvalUrl: `${consoleBaseUrl}/approvals/request?package=${encodeURIComponent(pkg)}&version=${encodeURIComponent(version)}`,
   };

@@ -29,5 +29,17 @@ filters:
     # the engine is unreachable — the gate stays shut.
     fail-closed: false
 
+# The same plugin also registers a middleware that gates *direct tarball fetches*
+# (e.g. `npm ci` from a lockfile), which bypass packument resolution. Without it,
+# a pinned-but-held version would still download.
+middlewares:
+  embargo:
+    engine-addr: engine:50051
+    console-url: http://localhost:4000
+    tls-cert: /certs/gateway.crt
+    tls-key: /certs/gateway.key
+    tls-ca: /certs/ca.crt
+    fail-closed: false
+
 log: { type: stdout, format: pretty, level: info }
 listen: 0.0.0.0:4873

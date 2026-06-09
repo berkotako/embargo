@@ -45,6 +45,21 @@ impl EngineService for EngineServiceImpl {
         tracing::Span::current().record("pkg", &vi.package);
         tracing::Span::current().record("ver", &vi.version);
 
+        // Tarball-gate / publish-time-less callers (the L1 direct-tarball gate and
+        // the L2 admission gate when it has no publish time) can't recompute
+        // cooldown. Return the verdict already computed during packument
+        // resolution so the tarball fetch enforces exactly what the packument
+        // rewrite decided — closing the direct-tarball bypass. On a true miss we
+        // fall through to compute, which fail-safes to HOLD without a publish time.
+        if vi.published_at.is_none() {
+            if let Some(persisted) = db::verdicts::get(&self.state.pool, &vi.package, &vi.version)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?
+            {
+                return Ok(Response::new(verdict_to_proto(persisted)));
+            }
+        }
+
         let verdict = resolve_one(&self.state, &vi.package, &vi.version, vi.published_at)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -589,6 +604,51 @@ rules:
             r.verdict,
             ProtoVerdict::Deny as i32,
             "approval must not release a known-malicious DENY"
+        );
+    }
+
+    /// The tarball gate calls Resolve with no publish time. The engine must
+    /// return the verdict persisted during packument resolution (here a DENY),
+    /// so a direct tarball fetch enforces exactly what the packument rewrite did.
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn resolve_without_publish_time_returns_persisted_verdict() {
+        use crate::generated::embargo::v1::{ResolveRequest, VersionInfo};
+        let state = test_state().await;
+        let pkg = unique("tarball-gate");
+        let ver = "1.0.0";
+
+        // Seed the persisted DENY a prior packument resolution would have written.
+        let denied = embargo_core::types::VersionVerdict {
+            package: pkg.clone(),
+            version: ver.into(),
+            verdict: Verdict::Deny,
+            reasons: vec![HoldReason::KnownMalicious {
+                source: "itest".into(),
+            }],
+            signals: vec![],
+            provenance: None,
+            computed_at: Utc::now(),
+            expires_at: None,
+        };
+        crate::db::verdicts::upsert(&state.pool, &denied)
+            .await
+            .unwrap();
+
+        let svc = EngineServiceImpl::new(state.clone());
+        let req = tonic::Request::new(ResolveRequest {
+            version_info: Some(VersionInfo {
+                package: pkg.clone(),
+                version: ver.into(),
+                published_at: None,
+            }),
+            caller_service: "gateway-tarball".into(),
+        });
+        let resp = svc.resolve(req).await.unwrap().into_inner();
+        assert_eq!(
+            resp.verdict,
+            ProtoVerdict::Deny as i32,
+            "tarball-gate resolve must return the persisted DENY"
         );
     }
 

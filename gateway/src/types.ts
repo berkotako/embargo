@@ -62,6 +62,23 @@ export interface PackumentResolver {
   ): Promise<PackumentResponse>;
 }
 
+/** The engine surface the tarball gate depends on: a single-version verdict. */
+export interface VersionResolver {
+  resolveVersion(pkg: string, version: string): Promise<VersionVerdict>;
+}
+
+/** Minimal Express-style request/response so we don't depend on @types/express. */
+export interface GateRequest {
+  method?: string;
+  url?: string;
+  path?: string;
+}
+export interface GateResponse {
+  status(code: number): GateResponse;
+  json(body: unknown): void;
+}
+export type GateNext = () => void;
+
 export interface HeldVersionError {
   package: string;
   version: string;

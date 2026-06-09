@@ -52,6 +52,10 @@ impl HttpRegistryClient {
     pub fn new(upstream: impl Into<String>) -> Result<Self> {
         let http = reqwest::Client::builder()
             .user_agent("embargo-engine")
+            // Bound the background fetch so a slow/hung upstream can't stall the
+            // extractor indefinitely.
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
             .build()?;
         Ok(Self {
             http,

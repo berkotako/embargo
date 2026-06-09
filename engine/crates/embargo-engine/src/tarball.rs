@@ -15,11 +15,45 @@ const MAX_TOTAL_BYTES: u64 = 32 * 1024 * 1024; // 32 MiB decompressed
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024; // 4 MiB per captured file
 const MAX_FILES: usize = 20_000;
 
+/// Reader that errors once more than `limit` bytes have flowed through it. The
+/// cap is on bytes *actually decompressed*, so a gzip bomb can't expand unbounded
+/// regardless of the (attacker-controlled) tar header `size` fields — those are
+/// not trustworthy for sizing.
+struct LimitedReader<R> {
+    inner: R,
+    remaining: u64,
+}
+
+impl<R: Read> LimitedReader<R> {
+    fn new(inner: R, limit: u64) -> Self {
+        Self {
+            inner,
+            remaining: limit,
+        }
+    }
+}
+
+impl<R: Read> Read for LimitedReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        if n as u64 > self.remaining {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "tarball exceeds decompressed-size limit",
+            ));
+        }
+        self.remaining -= n as u64;
+        Ok(n)
+    }
+}
+
 /// Parse an npm package tarball into a `VersionArtifact`. The packument
 /// metadata (publisher, repo, provenance) is layered on afterward by the
 /// extractor — this fills `manifest`, `files`, and `script_sources`.
 pub fn parse(gz_bytes: &[u8]) -> Result<VersionArtifact> {
-    let decoder = GzDecoder::new(gz_bytes);
+    // Cap decompressed bytes at the source (real bytes read), not via the tar
+    // header sizes which a bomb can understate.
+    let decoder = LimitedReader::new(GzDecoder::new(gz_bytes), MAX_TOTAL_BYTES);
     let mut archive = Archive::new(decoder);
 
     let mut contents: BTreeMap<String, Vec<u8>> = BTreeMap::new();
@@ -222,5 +256,19 @@ mod tests {
     fn errors_without_package_json() {
         let tgz = make_tarball(&[("index.js", b"x")]);
         assert!(parse(&tgz).is_err());
+    }
+
+    #[test]
+    fn rejects_decompression_bomb() {
+        // ~33 MiB of highly-compressible data: tiny on the wire, over the cap once
+        // decompressed. Must be rejected rather than read into memory.
+        let pkg: &[u8] = br#"{"name":"x","version":"1.0.0"}"#;
+        let big = vec![0u8; 33 * 1024 * 1024];
+        let tgz = make_tarball(&[("package.json", pkg), ("blob.bin", big.as_slice())]);
+        let err = parse(&tgz).unwrap_err().to_string();
+        assert!(
+            err.contains("limit") || err.contains("decompressed"),
+            "expected a size-cap error, got: {err}"
+        );
     }
 }

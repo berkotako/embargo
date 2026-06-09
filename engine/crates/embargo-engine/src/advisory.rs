@@ -57,6 +57,8 @@ impl OsvClient {
     pub fn new(endpoint: impl Into<String>) -> Result<Self> {
         let http = reqwest::Client::builder()
             .user_agent("embargo-engine")
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
             .build()?;
         Ok(Self {
             http,

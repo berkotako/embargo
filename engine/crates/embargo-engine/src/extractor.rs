@@ -7,7 +7,7 @@
 //! This never runs on the resolve hot path — it is invoked out-of-band during
 //! the HOLD window (or by a queue worker).
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use embargo_core::signals::{extract_signals, VersionArtifact};
 use embargo_core::types::{Provenance, Signal};
 use sqlx::PgPool;
@@ -46,16 +46,16 @@ pub async fn extract_and_store(
     let mut signals = extract_signals(&current, prior.as_ref());
 
     // Advisory feed match → critical advisory_match signal (auto-DENY). A feed
-    // error must not let a version through, but also must not block all
-    // extraction: log and continue with the behavioral signals we have.
-    match advisory.query(package, version).await {
-        Ok(advisories) => {
-            for adv in &advisories {
-                info!(advisory = %adv.id, "advisory match");
-                signals.push(advisory::to_signal(adv));
-            }
-        }
-        Err(e) => tracing::warn!(error = %e, "advisory feed query failed; skipping advisory match"),
+    // error must NOT finalize the version as advisory-clean: abort extraction so
+    // the version stays HELD (pending) and is retried, rather than persisting a
+    // verdict that could later flip to ALLOW while a real advisory went unseen.
+    let advisories = advisory
+        .query(package, version)
+        .await
+        .context("advisory feed query failed; not finalizing extraction")?;
+    for adv in &advisories {
+        info!(advisory = %adv.id, "advisory match");
+        signals.push(advisory::to_signal(adv));
     }
 
     info!(count = signals.len(), provenance = ?prov_verdict, "extracted signals");

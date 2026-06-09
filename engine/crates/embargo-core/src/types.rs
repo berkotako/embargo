@@ -146,6 +146,21 @@ pub struct VersionVerdict {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
+impl VersionVerdict {
+    pub fn allow(package: impl Into<String>, version: impl Into<String>) -> Self {
+        Self {
+            package: package.into(),
+            version: version.into(),
+            verdict: Verdict::Allow,
+            reasons: vec![],
+            signals: vec![],
+            provenance: None,
+            computed_at: Utc::now(),
+            expires_at: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,20 +192,5 @@ mod tests {
             score: 80
         }
         .is_hard_block());
-    }
-}
-
-impl VersionVerdict {
-    pub fn allow(package: impl Into<String>, version: impl Into<String>) -> Self {
-        Self {
-            package: package.into(),
-            version: version.into(),
-            verdict: Verdict::Allow,
-            reasons: vec![],
-            signals: vec![],
-            provenance: None,
-            computed_at: Utc::now(),
-            expires_at: None,
-        }
     }
 }

@@ -1002,6 +1002,7 @@ rules:
             osv_endpoint: "https://api.osv.dev".into(),
             bootstrap_policy_path: String::new(),
             auth: crate::config::AuthConfig::default(),
+            provenance: crate::config::ProvenanceConfig::default(),
         };
         EngineState::new(
             pool,
@@ -1010,6 +1011,7 @@ rules:
             std::sync::Arc::new(crate::registry::MockRegistryClient::default()),
             std::sync::Arc::new(crate::advisory::MockAdvisoryClient::default()),
             auth,
+            std::sync::Arc::new(crate::provenance::sigstore::ProvenancePolicy::default()),
         )
     }
 

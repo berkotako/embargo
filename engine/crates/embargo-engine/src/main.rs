@@ -16,7 +16,7 @@ mod tarball;
 mod testutil;
 mod tracker;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::info;
 
 #[tokio::main]
@@ -76,7 +76,38 @@ async fn main() -> Result<()> {
              Set auth.mode=oidc for any real deployment."
         );
     }
-    let engine = grpc::EngineState::new(pool, redis, cfg.clone(), registry, advisory, auth);
+
+    // Provenance trust policy. Without a configured Fulcio trust root, attestations
+    // can never verify (fail-safe), so require_provenance policies DENY rather than
+    // trusting an unverifiable attestation.
+    let trust_pem = if cfg.provenance.trust_root_pem.is_empty() {
+        String::new()
+    } else if let Some(path) = cfg.provenance.trust_root_pem.strip_prefix('@') {
+        std::fs::read_to_string(path)
+            .with_context(|| format!("reading provenance trust root from {path}"))?
+    } else {
+        cfg.provenance.trust_root_pem.clone()
+    };
+    let provenance = std::sync::Arc::new(provenance::sigstore::ProvenancePolicy::from_pem(
+        &trust_pem,
+        cfg.provenance.accepted_issuers.clone(),
+    )?);
+    if !provenance.is_configured() {
+        tracing::warn!(
+            "provenance verification is NOT configured (no Fulcio trust root) — \
+             require_provenance policies will DENY until provenance.trust_root_pem is set."
+        );
+    }
+
+    let engine = grpc::EngineState::new(
+        pool,
+        redis,
+        cfg.clone(),
+        registry,
+        advisory,
+        auth,
+        provenance,
+    );
 
     // JSON admin facade for the console (separate port from gRPC + metrics).
     let admin_server = {

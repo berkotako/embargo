@@ -240,6 +240,7 @@ fn spawn_extraction(state: EngineState, package: String, version: String) {
         match crate::extractor::extract_and_store(
             state.registry.as_ref(),
             state.advisory.as_ref(),
+            state.provenance.as_ref(),
             &state.pool,
             &package,
             &version,
@@ -387,6 +388,7 @@ rules:
             osv_endpoint: "https://api.osv.dev".into(),
             bootstrap_policy_path: String::new(),
             auth: crate::config::AuthConfig::default(),
+            provenance: crate::config::ProvenanceConfig::default(),
         };
 
         EngineState::new(
@@ -396,6 +398,7 @@ rules:
             registry,
             advisory,
             std::sync::Arc::new(crate::auth::AuthState::disabled()),
+            std::sync::Arc::new(crate::provenance::sigstore::ProvenancePolicy::default()),
         )
     }
 
@@ -619,6 +622,7 @@ rules:
         let signals = crate::extractor::extract_and_store(
             state.registry.as_ref(),
             state.advisory.as_ref(),
+            state.provenance.as_ref(),
             &state.pool,
             &pkg,
             ver,
@@ -670,6 +674,7 @@ rules:
         crate::extractor::extract_and_store(
             state.registry.as_ref(),
             state.advisory.as_ref(),
+            state.provenance.as_ref(),
             &state.pool,
             &pkg,
             ver,
@@ -692,19 +697,31 @@ rules:
         );
     }
 
-    /// require_provenance gate: a version with a valid, matching attestation
-    /// passes the gate and (aged, no signals) resolves to ALLOW.
+    /// require_provenance gate: a version with a cryptographically valid,
+    /// identity-bound attestation passes the gate and (aged, no signals) ALLOWs.
+    /// Exercises the full Sigstore path: DSSE signature + Fulcio chain + identity.
     #[tokio::test]
     #[ignore = "requires DATABASE_URL + Redis"]
     async fn provenance_verified_allows() {
-        let registry = std::sync::Arc::new(crate::testutil::benign_registry(true));
-        let state = test_state_with(registry).await;
+        // A signed bundle for github.com/acme/demo + the trust policy that accepts
+        // its (test) CA and OIDC issuer.
+        let (attestation, policy) = crate::testutil::signed_provenance(
+            "acme/demo",
+            ".github/workflows/release.yml",
+            "https://token.actions.githubusercontent.com",
+        );
+        let mut registry = crate::testutil::benign_registry(false);
+        registry.attestation = Some(attestation);
+        let mut state = test_state_with(std::sync::Arc::new(registry)).await;
+        state.provenance = std::sync::Arc::new(policy);
+
         let pkg = unique("prov");
         let ver = "1.0.0";
 
         crate::extractor::extract_and_store(
             state.registry.as_ref(),
             state.advisory.as_ref(),
+            state.provenance.as_ref(),
             &state.pool,
             &pkg,
             ver,
@@ -718,7 +735,7 @@ rules:
         assert_eq!(
             r.verdict,
             ProtoVerdict::Allow as i32,
-            "verified provenance + aged version must ALLOW"
+            "cryptographically verified provenance + aged version must ALLOW"
         );
     }
 
@@ -745,6 +762,7 @@ rules:
         let signals = crate::extractor::extract_and_store(
             state.registry.as_ref(),
             state.advisory.as_ref(),
+            state.provenance.as_ref(),
             &state.pool,
             &pkg,
             ver,

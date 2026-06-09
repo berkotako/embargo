@@ -13,7 +13,8 @@
 //! structurally-broken attestation, so the gate fails safe.
 
 use base64::Engine as _;
-use embargo_core::types::Provenance;
+
+pub mod sigstore;
 
 /// What we extract from a provenance attestation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,36 +77,6 @@ pub fn parse(attestations: &serde_json::Value) -> Option<ProvenanceInfo> {
     }
 
     None
-}
-
-/// Decide a `Provenance` verdict from a parsed attestation and the package's
-/// claimed repository. Structural verification (see module note).
-pub fn verify(info: Option<&ProvenanceInfo>, claimed_repo: Option<&str>) -> Provenance {
-    let Some(info) = info else {
-        return Provenance::Absent;
-    };
-
-    let Some(repo) = info.source_repo.clone() else {
-        return Provenance::Invalid {
-            reason: "provenance attestation has no source repository".into(),
-        };
-    };
-
-    // If the package declares a repo, it must match the attested source.
-    if let Some(claimed) = claimed_repo {
-        if normalize_repo(claimed) != normalize_repo(&repo) {
-            return Provenance::Invalid {
-                reason: format!(
-                    "attested source {repo} does not match declared repository {claimed}"
-                ),
-            };
-        }
-    }
-
-    Provenance::Verified {
-        workflow: info.workflow.clone().unwrap_or_default(),
-        repo,
-    }
 }
 
 /// SLSA v1 puts the source under resolvedDependencies / externalParameters;
@@ -175,17 +146,6 @@ fn clean_uri(uri: &str) -> String {
     s.trim_end_matches(".git").trim_end_matches('/').to_string()
 }
 
-/// Normalize for comparison: drop scheme, `.git`, trailing slash; lowercase.
-fn normalize_repo(url: &str) -> String {
-    let s = clean_uri(url).to_lowercase();
-    s.strip_prefix("https://")
-        .or_else(|| s.strip_prefix("http://"))
-        .or_else(|| s.strip_prefix("git://"))
-        .or_else(|| s.strip_prefix("ssh://git@"))
-        .unwrap_or(&s)
-        .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,26 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn verify_matches_claimed_repo() {
-        let json = attestations_json("https://github.com/acme/demo", "release.yml");
-        let info = parse(&json);
-        let p = verify(info.as_ref(), Some("git+https://github.com/acme/demo.git"));
-        assert!(matches!(p, Provenance::Verified { .. }));
-    }
-
-    #[test]
-    fn verify_rejects_repo_mismatch() {
-        let json = attestations_json("https://github.com/attacker/fork", "release.yml");
-        let info = parse(&json);
-        let p = verify(info.as_ref(), Some("https://github.com/acme/demo"));
-        assert!(matches!(p, Provenance::Invalid { .. }));
-    }
-
-    #[test]
     fn absent_when_no_attestations() {
         let json = serde_json::json!({ "attestations": [] });
         assert!(parse(&json).is_none());
-        assert!(matches!(verify(None, Some("x")), Provenance::Absent));
     }
 
     #[test]

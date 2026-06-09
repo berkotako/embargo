@@ -21,6 +21,22 @@ pub struct Config {
     /// Admin facade authentication.
     #[serde(default)]
     pub auth: AuthConfig,
+    /// Cryptographic provenance (Sigstore) verification trust policy.
+    #[serde(default)]
+    pub provenance: ProvenanceConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ProvenanceConfig {
+    /// PEM bundle of trusted Sigstore Fulcio CA certificates (root +
+    /// intermediates). Empty disables verification — provenance can never be
+    /// reported `Verified`, so `require_provenance` policies fail safe (DENY).
+    #[serde(default)]
+    pub trust_root_pem: String,
+    /// Accepted OIDC issuer URLs in the signing certificate (e.g.
+    /// `https://token.actions.githubusercontent.com`). Empty = do not constrain.
+    #[serde(default)]
+    pub accepted_issuers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

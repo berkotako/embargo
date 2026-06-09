@@ -57,6 +57,11 @@ base64 = "0.22"
 
 # OIDC / JWT verification for the admin facade
 jsonwebtoken = "9"
+p256 = { version = "0.13.2", features = ["ecdsa"] }
+x509-parser = { version = "0.18.1", features = ["verify"] }
 
 [build-dependencies]
 tonic-build = { workspace = true }
+
+[dev-dependencies]
+rcgen = { version = "0.14.8", features = ["x509-parser"] }

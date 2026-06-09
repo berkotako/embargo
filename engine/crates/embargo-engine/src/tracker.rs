@@ -65,6 +65,7 @@ async fn track_one(state: &EngineState, entry: &db::watchlist::WatchEntry) -> Re
     extractor::extract_and_store(
         state.registry.as_ref(),
         state.advisory.as_ref(),
+        state.provenance.as_ref(),
         &state.pool,
         &entry.target,
         &latest,

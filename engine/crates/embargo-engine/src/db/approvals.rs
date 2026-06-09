@@ -187,8 +187,10 @@ pub async fn reject(pool: &PgPool, id: Uuid, approver_id: Uuid, reason: &str) ->
     Ok(result.rows_affected() > 0)
 }
 
-/// Seed an already-active approval directly (used by tests and the internal gRPC
-/// admin path). The SoD-enforced flow is `request` + `approve`.
+/// Seed an already-active approval directly. Test-only: production flows must
+/// go through the SoD-enforced `request` + `approve` pair (the gRPC admin path
+/// that used this is disabled until mTLS peer identity is enforced).
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn create(
     pool: &PgPool,
     package: &str,

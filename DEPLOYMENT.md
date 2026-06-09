@@ -155,11 +155,12 @@ auth:
 
 ### 3. Close the gate (`fail-closed`)
 
-The gateway filter defaults to **fail-open** — if the engine is unreachable it
-serves packuments unfiltered, prioritizing availability. For a security gate you
-almost certainly want the opposite: set `fail-closed: true` in the filter config
-so the gateway **refuses to serve** when it cannot get a verdict. Decide this
-deliberately — it trades availability for enforcement.
+The gateway filter defaults to **fail-closed** — if the engine is unreachable
+it **refuses to serve** rather than open the gate. The dev configs set
+`fail-closed: false` for local convenience (serve unfiltered when the engine is
+down); never carry that into production. Engine RPCs carry a deadline
+(`timeout-ms`, default 5000 ms) so a hung engine triggers the fail mode instead
+of stalling installs.
 
 ### 4. Managed, highly-available datastores
 

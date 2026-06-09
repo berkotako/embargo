@@ -30,9 +30,12 @@ A pinned-but-held version yields a clear Embargo error with an approval link
 
 ### Fail mode
 
-If the engine is unreachable the filter **fails open** (serves the unfiltered
-packument) for availability, logging loudly. Set `fail-closed: true` to instead
-serve no versions — the gate stays shut at the cost of breaking installs.
+If the engine is unreachable the filter **fails closed** by default: it serves
+no versions, so the gate stays shut at the cost of breaking installs. Set
+`fail-closed: false` (dev only) to instead serve the unfiltered packument for
+availability, logging loudly. Engine RPCs carry a deadline (`timeout-ms`,
+default 5000) so a hung engine triggers the fail mode instead of stalling
+installs forever.
 
 ## Configuration (`verdaccio.config.yaml`)
 

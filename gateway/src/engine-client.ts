@@ -17,16 +17,25 @@ const PROTO_PATH = path.join(PROTO_DIR, 'embargo.proto');
 export class EngineClient {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- grpc dynamic service
   private client: any;
+  private timeoutMs: number;
 
   constructor(cfg: EmbargoPluginConfig) {
-    const pkgDef = protoLoader.loadSync(PROTO_PATH, {
-      keepCase: false,
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true,
-      includeDirs: [PROTO_DIR],
-    });
+    let pkgDef: protoLoader.PackageDefinition;
+    try {
+      pkgDef = protoLoader.loadSync(PROTO_PATH, {
+        keepCase: false,
+        longs: String,
+        enums: String,
+        defaults: true,
+        oneofs: true,
+        includeDirs: [PROTO_DIR],
+      });
+    } catch (err) {
+      throw new Error(
+        `[embargo] failed to load engine proto from ${PROTO_PATH} ` +
+          `(set EMBARGO_PROTO_DIR to the directory containing embargo.proto): ${String(err)}`,
+      );
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- grpc dynamic type
     const proto = grpc.loadPackageDefinition(pkgDef) as any;
 
@@ -39,6 +48,15 @@ export class EngineClient {
         : grpc.credentials.createSsl(ca);
 
     this.client = new proto.embargo.v1.EngineService(cfg.engineAddr, creds);
+    this.timeoutMs = cfg.timeoutMs;
+  }
+
+  /**
+   * Per-call deadline: without one, a hung (not dead) engine stalls every
+   * resolve forever and the fail-open/closed handling never runs.
+   */
+  private callOptions(): grpc.CallOptions {
+    return { deadline: new Date(Date.now() + this.timeoutMs) };
   }
 
   async resolvePackument(
@@ -59,6 +77,7 @@ export class EngineClient {
 
       this.client.resolvePackument(
         req,
+        this.callOptions(),
         (err: grpc.ServiceError | null, res: ResolvePackumentProtoResponse) => {
           if (err) { reject(err); return; }
           const stripped = new Map<string, VersionVerdict>();
@@ -88,6 +107,7 @@ export class EngineClient {
     return new Promise((resolve, reject) => {
       this.client.resolve(
         { versionInfo: { package: pkg, version }, callerService: 'gateway-tarball' },
+        this.callOptions(),
         (err: grpc.ServiceError | null, res: ResolveProtoResponse) => {
           if (err) {
             reject(err);

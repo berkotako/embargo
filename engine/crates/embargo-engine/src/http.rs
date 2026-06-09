@@ -887,10 +887,18 @@ async fn add_feed(
             "name and url are required".into(),
         ));
     }
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    // Parse up front so an unfetchable URL can't be stored (the SSRF guard in
+    // feeds::fetch_feed_guarded re-validates at sync time).
+    let parsed = reqwest::Url::parse(url).map_err(|_| {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            "url must be a valid absolute URL".into(),
+        )
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err(ApiError(
             StatusCode::BAD_REQUEST,
-            "url must be http(s)".into(),
+            "url must be http(s) with a host".into(),
         ));
     }
     let ecosystem = body.ecosystem.as_deref().unwrap_or("npm");

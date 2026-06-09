@@ -77,6 +77,8 @@ describe('rewritePackument', () => {
     expect(meta.heldVersions['1.1.0']).toBeDefined();
     expect(meta.heldVersions['1.1.0'].approvalUrl).toContain('1.1.0');
     expect(meta.heldVersions['1.1.0'].approvalUrl).toContain(BASE_URL);
+    // The link must pre-fill the package too, not just the version.
+    expect(meta.heldVersions['1.1.0'].approvalUrl).toContain('package=testpkg');
   });
 
   test('passes through empty packument unchanged', async () => {

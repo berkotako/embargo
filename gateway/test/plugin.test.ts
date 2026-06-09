@@ -40,18 +40,24 @@ describe('EmbargoStorageFilter.filter_metadata', () => {
     expect(Object.keys(out.versions)).toEqual(['1.0.0']);
   });
 
-  test('fail-open (default): serves the unfiltered packument when the engine errors', async () => {
+  test('fail-closed (default): serves no versions when the engine errors', async () => {
     const filter = new EmbargoStorageFilter({}, {}, failingEngine());
+    const out = await filter.filter_metadata(makePackument(['1.0.0', '1.1.0']));
+    expect(Object.keys(out.versions)).toHaveLength(0);
+    expect(Object.keys(out['dist-tags'])).toHaveLength(0);
+  });
+
+  test('fail-open (explicit opt-out): serves the unfiltered packument when the engine errors', async () => {
+    const filter = new EmbargoStorageFilter({ 'fail-closed': false }, {}, failingEngine());
     const pkg = makePackument(['1.0.0', '1.1.0']);
     const out = await filter.filter_metadata(pkg);
     expect(Object.keys(out.versions)).toEqual(['1.0.0', '1.1.0']);
   });
 
-  test('fail-closed: serves no versions when the engine errors', async () => {
-    const filter = new EmbargoStorageFilter({ 'fail-closed': true }, {}, failingEngine());
-    const out = await filter.filter_metadata(makePackument(['1.0.0', '1.1.0']));
-    expect(Object.keys(out.versions)).toHaveLength(0);
-    expect(Object.keys(out['dist-tags'])).toHaveLength(0);
+  test('fail-closed: a YAML string "false" opts out (no truthy-string coercion)', async () => {
+    const filter = new EmbargoStorageFilter({ 'fail-closed': 'false' }, {}, failingEngine());
+    const out = await filter.filter_metadata(makePackument(['1.0.0']));
+    expect(Object.keys(out.versions)).toEqual(['1.0.0']);
   });
 
   test('reads kebab-case config keys (Verdaccio yaml style)', () => {

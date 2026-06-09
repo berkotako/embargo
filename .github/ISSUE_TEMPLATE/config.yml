@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/berkotako/embargo/security/advisories/new
+    about: Do NOT open a public issue for vulnerabilities. Use a private security advisory — see SECURITY.md.
+  - name: Question / discussion
+    url: https://github.com/berkotako/embargo/discussions
+    about: Ask questions or discuss ideas before filing a feature request.

@@ -1,0 +1,19 @@
+# Code owners are requested for review automatically and (once branch protection
+# requires it) must approve changes to the paths they own. Today the project has
+# a single maintainer; add per-area owners here as the team grows.
+#
+# Order matters: the last matching pattern wins.
+
+# Default owner for everything.
+*                       @berkotako
+
+# Security-critical surfaces — keep an explicit owner so these always get a
+# deliberate review even after more contributors join.
+/engine/                @berkotako
+/engine/crates/embargo-engine/src/provenance/   @berkotako
+/engine/crates/embargo-engine/src/auth.rs       @berkotako
+/sandbox/               @berkotako
+/policy/                @berkotako
+/.github/               @berkotako
+SECURITY.md             @berkotako
+CODE_OF_CONDUCT.md      @berkotako

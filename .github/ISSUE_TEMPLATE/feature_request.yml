@@ -1,0 +1,38 @@
+name: Feature request
+description: Propose a new signal, policy capability, or improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a **new signal**, please skim `docs/SIGNALS.md` first — signals
+        return a weighted finding, never a hard verdict.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What attack, gap, or friction does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should Embargo do? Which layer (engine/gateway/admission/sandbox/console)?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Alignment
+      options:
+        - label: This is defensive (detects/blocks malicious packages), not evasion.
+          required: true
+        - label: It favors HOLD over auto-DENY on weak/uncertain signals.
+          required: false

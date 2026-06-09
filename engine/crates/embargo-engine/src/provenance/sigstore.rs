@@ -194,8 +194,11 @@ fn verify_one(
         );
     }
     if let Some(claimed) = claimed_repo {
-        let claimed = normalize_repo(claimed);
-        if !normalize_repo(&identity.repo).starts_with(&claimed) {
+        // Exact match on the normalized host/owner/repo. `identity.repo` is
+        // already reduced to those three segments by `split_repo_workflow`, so a
+        // prefix match would wrongly accept a sibling repo (e.g. a claimed
+        // `github.com/acme/demo` must not be satisfied by `…/demo-evil`).
+        if normalize_repo(&identity.repo) != normalize_repo(claimed) {
             bail!(
                 "certificate identity repo {} does not match declared repository {claimed}",
                 identity.repo
@@ -506,6 +509,29 @@ mod tests {
             .unwrap()
             .into_vec();
         assert!(verify_p256(&other_spki, &pae, sig_der.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn binds_repo_exactly_rejecting_sibling_prefix() {
+        const ISSUER: &str = "https://token.actions.githubusercontent.com";
+        // A bundle for acme/demo-evil must NOT satisfy a claimed acme/demo.
+        let (att, policy) =
+            crate::testutil::signed_provenance("acme/demo-evil", ".github/workflows/r.yml", ISSUER);
+        assert!(matches!(
+            verify_attestations(&att, &policy, Some("https://github.com/acme/demo")),
+            Outcome::Invalid(_)
+        ));
+        // The exact repo verifies.
+        let (att2, policy2) =
+            crate::testutil::signed_provenance("acme/demo", ".github/workflows/r.yml", ISSUER);
+        assert!(matches!(
+            verify_attestations(
+                &att2,
+                &policy2,
+                Some("git+https://github.com/acme/demo.git")
+            ),
+            Outcome::Verified(_)
+        ));
     }
 
     #[test]

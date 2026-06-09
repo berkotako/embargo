@@ -13,6 +13,8 @@ export interface GrpcEngineOptions {
   consoleBaseUrl: string;
   /** mTLS material; when omitted, an insecure channel is used (dev only). */
   tls?: { cert: string; key: string; ca: string };
+  /** Per-RPC deadline in ms (default 5000) so a hung engine fails the gate fast. */
+  timeoutMs?: number;
 }
 
 /**
@@ -24,6 +26,7 @@ export class GrpcEngineClient implements EngineClient {
   private client: any;
   private callerService: string;
   private consoleBaseUrl: string;
+  private timeoutMs: number;
 
   constructor(opts: GrpcEngineOptions) {
     const pkgDef = protoLoader.loadSync(PROTO_PATH, {
@@ -48,6 +51,7 @@ export class GrpcEngineClient implements EngineClient {
     this.client = new proto.embargo.v1.EngineService(opts.engineAddr, creds);
     this.callerService = opts.callerService;
     this.consoleBaseUrl = opts.consoleBaseUrl;
+    this.timeoutMs = opts.timeoutMs ?? 5000;
   }
 
   async resolve(dep: Dep): Promise<DepVerdict> {
@@ -55,9 +59,12 @@ export class GrpcEngineClient implements EngineClient {
       versionInfo: { package: dep.name, version: dep.version },
       callerService: this.callerService,
     };
+    // Deadline so CI fails fast (fail-closed) instead of hanging on a sick
+    // engine — without it Promise.all in evaluate() can stall the whole build.
+    const options: grpc.CallOptions = { deadline: new Date(Date.now() + this.timeoutMs) };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- proto response
     const res: any = await new Promise((resolve, reject) => {
-      this.client.resolve(req, (err: grpc.ServiceError | null, r: unknown) => {
+      this.client.resolve(req, options, (err: grpc.ServiceError | null, r: unknown) => {
         if (err) reject(err);
         else resolve(r);
       });

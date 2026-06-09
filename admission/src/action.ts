@@ -1,9 +1,23 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import * as core from '@actions/core';
 import { execFileSync } from 'child_process';
 import { runGate } from './index';
 import { GrpcEngineClient } from './engine-client';
 import { toAnnotations, toArtifact, toHuman } from './report';
+
+// Inputs come from the workflow (PR-controllable in some trigger setups), so
+// constrain them: refs to plain revision names (no leading '-', no '..'
+// range syntax), lockfiles to repo-relative paths without traversal.
+const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
+function isSafeRef(ref: string): boolean {
+  return SAFE_REF.test(ref) && !ref.includes('..');
+}
+
+function isSafeLockfilePath(p: string): boolean {
+  return !path.isAbsolute(p) && !p.split(/[\\/]/).includes('..');
+}
 
 function gitShow(ref: string, file: string): string | null {
   try {
@@ -22,6 +36,14 @@ export async function run(): Promise<void> {
 
   if (!engineAddr) {
     core.setFailed('embargo: engine-addr input (or EMBARGO_ENGINE_ADDR) is required');
+    return;
+  }
+  if (!isSafeRef(base)) {
+    core.setFailed(`embargo: base-ref is not a plain git ref: ${base}`);
+    return;
+  }
+  if (!isSafeLockfilePath(lockfile)) {
+    core.setFailed(`embargo: lockfile must be a repo-relative path without '..': ${lockfile}`);
     return;
   }
   if (!fs.existsSync(lockfile)) {

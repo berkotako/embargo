@@ -72,7 +72,7 @@ export async function rewritePackument(
     versions: newVersions,
     time: newTime,
     // Attach Embargo metadata so clients can surface a clear message.
-    _embargo: buildEmbargoMeta(stripped, consoleBaseUrl),
+    _embargo: buildEmbargoMeta(pkg, stripped, consoleBaseUrl),
   };
 
   return result;
@@ -99,6 +99,7 @@ export function buildHeldError(
 }
 
 function buildEmbargoMeta(
+  pkg: string,
   stripped: Map<string, { verdict: string; reasons: string[] }>,
   consoleBaseUrl: string,
 ): Record<string, unknown> {
@@ -107,7 +108,7 @@ function buildEmbargoMeta(
     held[ver] = {
       verdict: info.verdict,
       reasons: info.reasons,
-      approvalUrl: `${consoleBaseUrl}/approvals/request?version=${encodeURIComponent(ver)}`,
+      approvalUrl: `${consoleBaseUrl}/approvals/request?package=${encodeURIComponent(pkg)}&version=${encodeURIComponent(ver)}`,
     };
   }
   return { heldVersions: held };

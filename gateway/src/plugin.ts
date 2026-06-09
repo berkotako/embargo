@@ -39,11 +39,13 @@ export class EmbargoStorageFilter {
       tlsKey: str(c['tls-key'] ?? c['tlsKey'], ''),
       tlsCa: str(c['tls-ca'] ?? c['tlsCa'], ''),
       callerService: 'gateway',
+      timeoutMs: num(c['timeout-ms'] ?? c['timeoutMs'], 5000),
     };
     this.consoleBaseUrl = str(c['console-url'] ?? c['consoleBaseUrl'], 'http://localhost:4000');
-    // Fail-open (serve unfiltered) by default for availability; set fail-closed
-    // to refuse to serve when the engine can't be reached — the gate stays shut.
-    this.failClosed = Boolean(c['fail-closed'] ?? c['failClosed'] ?? false);
+    // Fail closed by default: when the engine can't be reached, refuse to serve
+    // rather than open the gate. Set `fail-closed: false` explicitly (dev only)
+    // to prefer availability over enforcement.
+    this.failClosed = bool(c['fail-closed'] ?? c['failClosed'], true);
     this.engine = engine ?? new EngineClient(this.cfg);
   }
 
@@ -92,4 +94,16 @@ export class EmbargoStorageFilter {
 
 function str(v: unknown, fallback: string): string {
   return typeof v === 'string' && v.length > 0 ? v : fallback;
+}
+
+function num(v: unknown, fallback: number): number {
+  const n = typeof v === 'string' ? Number(v) : v;
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/** YAML configs may hand us a string — `"false"` must not coerce to true. */
+function bool(v: unknown, fallback: boolean): boolean {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') return v.trim().toLowerCase() !== 'false';
+  return fallback;
 }

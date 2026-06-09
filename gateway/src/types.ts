@@ -51,6 +51,8 @@ export interface EmbargoPluginConfig {
   tlsKey: string;
   tlsCa: string;
   callerService: string;
+  /** Per-RPC deadline in ms; without one a sick engine stalls every install. */
+  timeoutMs: number;
 }
 
 /** The engine surface the packument rewrite depends on (mockable in tests). */

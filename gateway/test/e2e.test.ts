@@ -23,6 +23,7 @@ run('gateway ⇄ engine (mTLS)', () => {
       tlsCa: fs.readFileSync(path.join(certs, 'ca.crt'), 'utf8'),
       tlsCert: withCert ? fs.readFileSync(path.join(certs, 'gateway.crt'), 'utf8') : '',
       tlsKey: withCert ? fs.readFileSync(path.join(certs, 'gateway.key'), 'utf8') : '',
+      timeoutMs: 5000,
     });
   }
 

@@ -145,9 +145,9 @@ full stack; the production checklist there covers real PKI, OIDC, the
 fail-closed gate, and managed datastores.
 
 **What happens if the engine goes down?**
-It's configurable. The gateway defaults to **fail-open** (serve unfiltered for
-availability); set `fail-closed: true` to make it **refuse to serve** without a
-verdict. Choose per your risk posture — see
+It's configurable. The gateway defaults to **fail-closed** (refuse to serve
+without a verdict); set `fail-closed: false` to make it **serve unfiltered**
+for availability. Choose per your risk posture — see
 [DEPLOYMENT.md §3](../DEPLOYMENT.md#3-close-the-gate-fail-closed).
 
 **Does it add latency to every install?**

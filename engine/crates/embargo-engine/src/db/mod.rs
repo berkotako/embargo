@@ -5,6 +5,7 @@ use crate::config::DatabaseConfig;
 
 pub mod approvals;
 pub mod audit;
+pub mod feed_sources;
 pub mod known_malicious;
 pub mod policies;
 pub mod provenance;

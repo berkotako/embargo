@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM known_malicious WHERE source = $1 AND ecosystem = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5ee7dea71747a7fe889d97971e1b10be757c1c7632f6b8f2d8498ba3ecff9f64"
+}

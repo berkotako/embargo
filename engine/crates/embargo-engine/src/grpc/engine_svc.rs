@@ -378,7 +378,6 @@ rules:
             osv_endpoint: "https://api.osv.dev".into(),
             bootstrap_policy_path: String::new(),
             auth: crate::config::AuthConfig::default(),
-            known_malicious_feed: crate::config::KnownMaliciousFeedConfig::default(),
         };
 
         EngineState::new(
@@ -430,6 +429,7 @@ rules:
         crate::db::known_malicious::replace_source(
             &state.pool,
             &source,
+            "npm",
             &[(pkg.clone(), ver.to_string())],
         )
         .await

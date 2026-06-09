@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO known_malicious (package, version, source, ecosystem)\n                SELECT u.package, u.version, $3, $4\n                FROM UNNEST($1::text[], $2::text[]) AS u(package, version)\n                ON CONFLICT (ecosystem, source, package, version) DO NOTHING\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d7ac44c530a92ae3d649c67c6a3b7a4f987e791646fcc2509e47a48bd41cc75f"
+}

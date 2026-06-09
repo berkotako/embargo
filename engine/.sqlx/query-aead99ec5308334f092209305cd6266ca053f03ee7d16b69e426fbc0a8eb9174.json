@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO known_malicious (package, version, source, ecosystem)\n        VALUES ($1, $2, $3, 'npm')\n        ON CONFLICT (ecosystem, source, package, version) DO UPDATE SET synced_at = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aead99ec5308334f092209305cd6266ca053f03ee7d16b69e426fbc0a8eb9174"
+}

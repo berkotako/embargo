@@ -67,8 +67,10 @@ pub fn router(state: EngineState) -> Router {
             get(list_known_malicious).post(add_known_malicious),
         )
         .route("/api/known-malicious/status", get(known_malicious_status))
-        .route("/api/known-malicious/sync", post(sync_known_malicious_now))
         .route("/api/known-malicious/remove", post(remove_known_malicious))
+        .route("/api/feeds", get(list_feeds).post(add_feed))
+        .route("/api/feeds/{id}", patch(update_feed).delete(delete_feed))
+        .route("/api/feeds/{id}/sync", post(sync_feed))
         .with_state(state)
 }
 
@@ -718,9 +720,6 @@ async fn list_known_malicious(
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct KnownMalStatus {
-    feed_enabled: bool,
-    feed_source: String,
-    feed_interval_secs: u64,
     total: i64,
     sources: Vec<db::known_malicious::SourceStatus>,
 }
@@ -732,14 +731,7 @@ async fn known_malicious_status(
     require(&user, Permission::ReadPolicies)?;
     let sources = db::known_malicious::status(&state.pool).await?;
     let total = sources.iter().map(|s| s.count).sum();
-    let cfg = &state.config.known_malicious_feed;
-    Ok(Json(KnownMalStatus {
-        feed_enabled: cfg.enabled,
-        feed_source: cfg.source.clone(),
-        feed_interval_secs: cfg.interval_secs,
-        total,
-        sources,
-    }))
+    Ok(Json(KnownMalStatus { total, sources }))
 }
 
 #[derive(Deserialize)]
@@ -769,13 +761,7 @@ async fn add_known_malicious(
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .unwrap_or(db::known_malicious::ALL_VERSIONS);
-    db::known_malicious::add_one(
-        &state.pool,
-        package,
-        version,
-        db::known_malicious::MANUAL_SOURCE,
-    )
-    .await?;
+    db::known_malicious::add_one(&state.pool, package, version).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -785,6 +771,7 @@ struct RemoveKnownMalBody {
     package: String,
     version: String,
     source: Option<String>,
+    ecosystem: Option<String>,
 }
 
 async fn remove_known_malicious(
@@ -797,10 +784,130 @@ async fn remove_known_malicious(
         .source
         .as_deref()
         .unwrap_or(db::known_malicious::MANUAL_SOURCE);
-    if db::known_malicious::remove_one(&state.pool, &body.package, &body.version, source).await? {
+    let ecosystem = body
+        .ecosystem
+        .as_deref()
+        .unwrap_or(db::known_malicious::NPM_ECOSYSTEM);
+    if db::known_malicious::remove_one(&state.pool, ecosystem, source, &body.package, &body.version)
+        .await?
+    {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError(StatusCode::NOT_FOUND, "entry not found".into()))
+    }
+}
+
+// ---- feed sources ----------------------------------------------------------
+
+async fn list_feeds(
+    State(state): State<EngineState>,
+    user: AuthUser,
+) -> ApiResult<Vec<db::feed_sources::FeedSource>> {
+    require(&user, Permission::ReadPolicies)?;
+    Ok(Json(db::feed_sources::list(&state.pool).await?))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddFeedBody {
+    name: String,
+    url: String,
+    ecosystem: Option<String>,
+    format: Option<String>,
+}
+
+async fn add_feed(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    Json(body): Json<AddFeedBody>,
+) -> ApiResult<db::feed_sources::FeedSource> {
+    require(&user, Permission::ManageKnownMalicious)?;
+    let name = body.name.trim();
+    let url = body.url.trim();
+    if name.is_empty() || url.is_empty() {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "name and url are required".into(),
+        ));
+    }
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "url must be http(s)".into(),
+        ));
+    }
+    let ecosystem = body.ecosystem.as_deref().unwrap_or("npm");
+    if ecosystem != "npm" && ecosystem != "pypi" {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "ecosystem must be npm or pypi".into(),
+        ));
+    }
+    let format = body.format.as_deref().unwrap_or("datadog-manifest");
+    if format != "datadog-manifest" {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "unsupported format".into(),
+        ));
+    }
+    let src = db::feed_sources::add(
+        &state.pool,
+        name,
+        url,
+        ecosystem,
+        format,
+        Some(user_uuid(&user.sub)),
+    )
+    .await?;
+    Ok(Json(src))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateFeedBody {
+    enabled: Option<bool>,
+    interval_seconds: Option<i64>,
+}
+
+async fn update_feed(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<UpdateFeedBody>,
+) -> Result<StatusCode, ApiError> {
+    require(&user, Permission::ManageKnownMalicious)?;
+    let id = uuid::Uuid::parse_str(&id)
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid feed id".into()))?;
+    let mut found = false;
+    if let Some(enabled) = body.enabled {
+        found |= db::feed_sources::set_enabled(&state.pool, id, enabled).await?;
+    }
+    if let Some(interval) = body.interval_seconds {
+        found |= db::feed_sources::set_interval(&state.pool, id, interval).await?;
+    }
+    if found {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError(StatusCode::NOT_FOUND, "feed not found".into()))
+    }
+}
+
+async fn delete_feed(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<StatusCode, ApiError> {
+    require(&user, Permission::ManageKnownMalicious)?;
+    let id = uuid::Uuid::parse_str(&id)
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid feed id".into()))?;
+    // Clear the source's entries before dropping the source row.
+    if let Some(src) = db::feed_sources::get(&state.pool, id).await? {
+        db::known_malicious::replace_source(&state.pool, &src.name, &src.ecosystem, &[]).await?;
+    }
+    if db::feed_sources::remove(&state.pool, id).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError(StatusCode::NOT_FOUND, "feed not found".into()))
     }
 }
 
@@ -810,13 +917,15 @@ struct SyncResult {
     written: u64,
 }
 
-async fn sync_known_malicious_now(
+async fn sync_feed(
     State(state): State<EngineState>,
     user: AuthUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<SyncResult> {
     require(&user, Permission::ManageKnownMalicious)?;
-    let cfg = &state.config.known_malicious_feed;
-    let written = crate::feeds::sync_known_malicious(&state, &cfg.url, &cfg.source).await?;
+    let id = uuid::Uuid::parse_str(&id)
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid feed id".into()))?;
+    let written = crate::feeds::sync_source(&state, id).await?;
     Ok(Json(SyncResult { written }))
 }
 
@@ -893,7 +1002,6 @@ rules:
             osv_endpoint: "https://api.osv.dev".into(),
             bootstrap_policy_path: String::new(),
             auth: crate::config::AuthConfig::default(),
-            known_malicious_feed: crate::config::KnownMaliciousFeedConfig::default(),
         };
         EngineState::new(
             pool,

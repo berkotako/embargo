@@ -171,7 +171,7 @@ production deployment is in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 - [Release](docs/RELEASE.md) — deploy a released build from published images; how to cut a release
 - [Changelog](CHANGELOG.md) — release notes
 - [Project plan](docs/PROJECT_PLAN.md) and [per-component plans](docs/plans/)
-- [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+- [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security](SECURITY.md)
 
 ## License
 

@@ -1,0 +1,54 @@
+name: Bug report
+description: Something isn't working as expected (NOT for security vulnerabilities).
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Do not file security vulnerabilities here** —
+        report them privately per [SECURITY.md](../blob/main/SECURITY.md).
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - engine (Policy & Signal Engine)
+        - gateway (L1 Verdaccio plugin)
+        - admission (L2 CI gate)
+        - sandbox (L3 containment)
+        - console (web admin)
+        - policy / docs / CI
+        - not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps. Include the package@version and policy if a verdict was wrong.
+      placeholder: |
+        1. Policy: …
+        2. Resolve `lodash@4.17.21` …
+        3. Observed verdict / error …
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Versions / commit, OS, how you're running it (compose, k8s, local).
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste logs or a verdict reason. Redact any secrets/tokens.
+      render: shell

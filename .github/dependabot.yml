@@ -1,0 +1,56 @@
+# Keep dependencies current — apt for a supply-chain-security project to dogfood
+# its own hygiene. Updates are grouped to reduce PR noise; review before merge.
+version: 2
+updates:
+  # GitHub Actions used by the workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Rust crates.
+  - package-ecosystem: cargo
+    directory: "/engine"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      engine-deps:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: "/sandbox"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      sandbox-deps:
+        patterns: ["*"]
+
+  # Node/TS packages.
+  - package-ecosystem: npm
+    directory: "/gateway"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      gateway-deps:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: "/console"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      console-deps:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: "/admission"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      admission-deps:
+        patterns: ["*"]

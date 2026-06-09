@@ -41,6 +41,8 @@ pub enum Permission {
     WriteApprovals,
     /// Add/modify/remove watchlist tracking targets (admin-only).
     ManageWatchlist,
+    /// Manage the known-malicious blocklist + trigger feed syncs (admin-only).
+    ManageKnownMalicious,
     /// Reserved for the policy-write endpoint (admin-only) once it lands.
     #[allow(dead_code)]
     WritePolicies,

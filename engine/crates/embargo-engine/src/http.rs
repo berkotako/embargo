@@ -62,6 +62,13 @@ pub fn router(state: EngineState) -> Router {
             "/api/watchlist/{id}",
             patch(update_watchlist).delete(delete_watchlist),
         )
+        .route(
+            "/api/known-malicious",
+            get(list_known_malicious).post(add_known_malicious),
+        )
+        .route("/api/known-malicious/status", get(known_malicious_status))
+        .route("/api/known-malicious/sync", post(sync_known_malicious_now))
+        .route("/api/known-malicious/remove", post(remove_known_malicious))
         .with_state(state)
 }
 
@@ -683,6 +690,134 @@ async fn delete_watchlist(
             "watchlist entry not found".into(),
         ))
     }
+}
+
+// ---- known-malicious feed --------------------------------------------------
+
+#[derive(Deserialize)]
+struct KnownMalQuery {
+    search: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+async fn list_known_malicious(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    Query(q): Query<KnownMalQuery>,
+) -> ApiResult<Vec<db::known_malicious::Entry>> {
+    require(&user, Permission::ReadPolicies)?;
+    let limit = q.limit.unwrap_or(200).clamp(1, 1000);
+    let offset = q.offset.unwrap_or(0).max(0);
+    let search = q.search.as_deref().filter(|s| !s.trim().is_empty());
+    Ok(Json(
+        db::known_malicious::list(&state.pool, search, limit, offset).await?,
+    ))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KnownMalStatus {
+    feed_enabled: bool,
+    feed_source: String,
+    feed_interval_secs: u64,
+    total: i64,
+    sources: Vec<db::known_malicious::SourceStatus>,
+}
+
+async fn known_malicious_status(
+    State(state): State<EngineState>,
+    user: AuthUser,
+) -> ApiResult<KnownMalStatus> {
+    require(&user, Permission::ReadPolicies)?;
+    let sources = db::known_malicious::status(&state.pool).await?;
+    let total = sources.iter().map(|s| s.count).sum();
+    let cfg = &state.config.known_malicious_feed;
+    Ok(Json(KnownMalStatus {
+        feed_enabled: cfg.enabled,
+        feed_source: cfg.source.clone(),
+        feed_interval_secs: cfg.interval_secs,
+        total,
+        sources,
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddKnownMalBody {
+    package: String,
+    /// Omit (or "*") to block every version of the package.
+    version: Option<String>,
+}
+
+async fn add_known_malicious(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    Json(body): Json<AddKnownMalBody>,
+) -> Result<StatusCode, ApiError> {
+    require(&user, Permission::ManageKnownMalicious)?;
+    let package = body.package.trim();
+    if package.is_empty() {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "package is required".into(),
+        ));
+    }
+    let version = body
+        .version
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(db::known_malicious::ALL_VERSIONS);
+    db::known_malicious::add_one(
+        &state.pool,
+        package,
+        version,
+        db::known_malicious::MANUAL_SOURCE,
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveKnownMalBody {
+    package: String,
+    version: String,
+    source: Option<String>,
+}
+
+async fn remove_known_malicious(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    Json(body): Json<RemoveKnownMalBody>,
+) -> Result<StatusCode, ApiError> {
+    require(&user, Permission::ManageKnownMalicious)?;
+    let source = body
+        .source
+        .as_deref()
+        .unwrap_or(db::known_malicious::MANUAL_SOURCE);
+    if db::known_malicious::remove_one(&state.pool, &body.package, &body.version, source).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError(StatusCode::NOT_FOUND, "entry not found".into()))
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncResult {
+    written: u64,
+}
+
+async fn sync_known_malicious_now(
+    State(state): State<EngineState>,
+    user: AuthUser,
+) -> ApiResult<SyncResult> {
+    require(&user, Permission::ManageKnownMalicious)?;
+    let cfg = &state.config.known_malicious_feed;
+    let written = crate::feeds::sync_known_malicious(&state, &cfg.url, &cfg.source).await?;
+    Ok(Json(SyncResult { written }))
 }
 
 #[cfg(test)]

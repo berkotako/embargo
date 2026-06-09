@@ -11,7 +11,13 @@
 #
 #   console  → http://<host>:4000
 #   gateway  → http://<host>:4873   (registry= this to firewall a client)
-#   admin API → http://<host>:8080/api
+#
+# The engine's admin API (8080), mTLS gRPC (50051) and metrics (9090) are NOT
+# published to the host: the console reaches the admin API over the internal
+# compose network (its nginx proxies /api → engine:8080), and the gateway reaches
+# gRPC at engine:50051. The admin API is plaintext + auth-gated, so keep it off
+# the host. Uncomment the engine `ports:` only if you must scrape metrics or hit
+# the API directly, and front it with TLS + real auth first.
 
 x-images:
   engine: &engine_image ghcr.io/berkotako/embargo-engine:${EMBARGO_VERSION:-0.1.0}
@@ -83,10 +89,10 @@ services:
     volumes:
       - certs:/certs:ro
       - ./policy/examples/default.yaml:/policy/default.yaml:ro
-    ports:
-      - "8080:8080"
-      - "50051:50051"
-      - "9090:9090"
+    # No host `ports:` — the admin API (8080), gRPC (50051) and metrics (9090) are
+    # reachable only on the internal compose network (console proxies /api →
+    # engine:8080; gateway dials engine:50051). Do not expose the plaintext admin
+    # API to the host. The healthcheck below uses container-localhost.
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9090/health/ready || exit 1"]
       interval: 5s

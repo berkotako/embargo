@@ -29,8 +29,33 @@ embargo-sandbox run \
    console's containment feed expects: `{ pkg, host, pipeline, repo, attempts,
    time, note }`.
 
-A phoning-home `postinstall` is therefore blocked and recorded, while the
-install still completes against the allowlisted registry.
+A phoning-home `postinstall` over TCP is therefore blocked and recorded, while
+the install still completes against the allowlisted registry.
+
+## Known limitations (containment scope)
+
+This layer is **defense in depth**, not an airtight jail. Treat its egress
+control as raising the cost of exfiltration and producing high-signal events —
+not as a guarantee. Tracked hardening gaps, in priority order:
+
+1. **Egress filter mediates `connect()` only.** UDP `sendto`/`sendmsg`, raw/
+   packet sockets (`AF_PACKET`, `SOCK_RAW`), and `io_uring`-submitted network ops
+   are **not** intercepted, so a determined payload can still exfiltrate (e.g. a
+   DNS tunnel). The filter must also EPERM raw/packet socket creation and mediate
+   the datagram send path.
+2. **`connect()` decision is TOCTOU-racy.** The destination is read from the
+   tracee and the syscall is resumed with `SECCOMP_USER_NOTIF_FLAG_CONTINUE`; a
+   multithreaded tracee can swap the address after the check. Argument-dependent
+   decisions should not use `CONTINUE`.
+3. **Namespace isolation is partial.** The mount/pid namespaces are created but
+   `/proc` is not remounted, root is not pivoted, and capabilities are not
+   dropped — the install runs as root-in-userns with host filesystem visibility.
+4. **Chain correlation is per-pid and windowed**, so the common
+   read-secret-in-parent / exfil-in-child split (and delayed exfil past the
+   window) evades it; cross-process tracking is the planned fix.
+
+Resource caps (`RLIMIT_NPROC`/`AS`/`FSIZE`/`CPU`/`NOFILE`) **are** applied to the
+child, bounding fork-bomb / disk-fill / memory-exhaustion DoS.
 
 ## Runtime compromise-chain detection (M4)
 

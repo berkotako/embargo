@@ -199,6 +199,33 @@ Required **outbound** from the engine: the upstream registry
 (`osv_endpoint`, default `api.osv.dev`). Everything else stays inside your
 network.
 
+## Threat feeds & continuous tracking
+
+Two background capabilities run inside the engine (no extra services):
+
+- **Watchlist tracking** — operators add packages/scopes (console → *Known
+  Packages* sits alongside, and the watchlist API at `/api/watchlist`) that a
+  worker re-evaluates on a per-entry interval, so new releases are analyzed
+  proactively (cooldown, signals, advisories, typosquatting) rather than only on
+  first client resolve. Per-entry `enabled` + `interval_seconds` control cadence.
+
+- **Known-malicious feed** — an **opt-in** sync of a curated malware dataset
+  (default: [Datadog's `malicious-software-packages-dataset`](https://github.com/DataDog/malicious-software-packages-dataset),
+  Apache-2.0 — see [`NOTICE`](NOTICE)) into the engine. Any `package@version` it
+  lists is an immediate **DENY** at resolve time (un-bypassable by fast-track).
+  Disabled by default; enable per environment:
+
+  ```bash
+  EMBARGO__KNOWN_MALICIOUS_FEED__ENABLED=true
+  # optional overrides (defaults shown):
+  # EMBARGO__KNOWN_MALICIOUS_FEED__URL=https://raw.githubusercontent.com/DataDog/malicious-software-packages-dataset/main/samples/npm/manifest.json
+  # EMBARGO__KNOWN_MALICIOUS_FEED__INTERVAL_SECS=21600   # 6h
+  ```
+
+  Operators can also add their own blocks and trigger a sync from the console
+  **Known Packages** screen (admin), or via `/api/known-malicious`. Enabling the
+  feed adds the feed URL host to the engine's required outbound list.
+
 ## Onboarding clients
 
 Once the gateway is reachable, a client opts in with **one line**:

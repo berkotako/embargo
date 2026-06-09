@@ -3,6 +3,29 @@
 All notable changes to Embargo are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Typosquatting signal** (`typosquat`) — flags a package name that is a
+  near-miss of a popular one (Damerau-Levenshtein edit distance, separator
+  variants, Unicode homoglyphs) against a bundled popular-name corpus, plus a
+  `lookalike_dropper` composite chain (typosquat + install-time script).
+- **Watchlist + continuous tracking** — a persistent Postgres watchlist of
+  packages/scopes and a background worker that re-evaluates each enabled target
+  on a configurable interval (or off). Admin API under `/api/watchlist`.
+- **Known-malicious feed** (opt-in) — sync a curated malware dataset (default
+  Datadog's npm manifest, Apache-2.0 — see `NOTICE`) into the engine; a match is
+  an immediate DENY, un-bypassable by fast-track. New console **Known Packages**
+  screen and `/api/known-malicious` API (view/search, manual block, sync).
+
+### Fixed
+
+- Policy dry-run now computes `would_release` / `affected_pkgs` for real instead
+  of returning placeholders.
+- DB-backed engine integration tests run single-threaded in CI to remove
+  shared-state flakiness.
+
 ## [0.1.0] — 2026-06-08
 
 First public, deployable release. The full L1–L3 firewall, the policy & signal

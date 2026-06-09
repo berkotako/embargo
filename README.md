@@ -25,7 +25,10 @@ Embargo adds what the package managers structurally won't:
 - **Per-scope policy** — hold public packages, pass your own `@org/*` instantly.
 - **Fast-track exceptions** — bypass the hold for emergency CVE fixes.
 - **Signal gating** — use the cooldown window to actually evaluate the version (new install
-  scripts, missing provenance, republish anomalies, advisory matches) and block the bad ones.
+  scripts, missing provenance, republish anomalies, typosquatting, advisory matches) and block the
+  bad ones.
+- **Threat feeds & tracking** — auto-DENY against a curated known-malicious feed (opt-in), and a
+  watchlist worker that re-evaluates tracked packages continuously.
 - **Pipeline admission control** — fail CI builds that introduce policy-violating versions.
 - **Install containment** — run installs sandboxed with controlled egress.
 

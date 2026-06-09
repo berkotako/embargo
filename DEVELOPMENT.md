@@ -156,6 +156,10 @@ endpoint authenticates and enforces RBAC server-side (`viewer` / `responder` /
 | POST | `/api/approvals/{id}/revoke` | responder |
 | GET | `/api/audit` | viewer |
 | GET | `/api/dashboard` | viewer |
+| GET | `/api/watchlist` | viewer |
+| POST / PATCH / DELETE | `/api/watchlist[/{id}]` | admin |
+| GET | `/api/known-malicious`, `/api/known-malicious/status` | viewer |
+| POST | `/api/known-malicious`, `/api/known-malicious/remove`, `/api/known-malicious/sync` | admin |
 
 **Auth modes** (`auth.mode`):
 - `oidc` — verify an RS256 bearer JWT against the IdP JWKS; map a roles claim.

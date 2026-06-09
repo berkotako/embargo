@@ -146,7 +146,10 @@ impl AdminService for AdminServiceImpl {
                 package: approval.package,
                 version: approval.version,
                 requester_id: approval.requester_id.to_string(),
-                approver_id: approval.approver_id.to_string(),
+                approver_id: approval
+                    .approver_id
+                    .map(|u| u.to_string())
+                    .unwrap_or_default(),
                 justification: approval.justification,
                 expires_at: None,
                 status: "active".into(),

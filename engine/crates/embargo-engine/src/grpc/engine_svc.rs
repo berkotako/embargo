@@ -224,12 +224,16 @@ async fn resolve_one(
         if let Some(approval) = db::approvals::get_active(&state.pool, package, version).await? {
             verdict.verdict = Verdict::Allow;
             verdict.reasons.push(HoldReason::ApprovedException {
-                approver: approval.approver_id.to_string(),
-                reason: format!("approved exception (expires {})", approval.expires_at),
+                approver: approval
+                    .approver_id
+                    .map(|u| u.to_string())
+                    .unwrap_or_default(),
+                reason: format!("approved exception (expires {:?})", approval.expires_at),
             });
             // An approval-overridden ALLOW expires when the approval does, so the
-            // gate re-closes automatically once the exception lapses.
-            verdict.expires_at = Some(approval.expires_at);
+            // gate re-closes automatically once the exception lapses. (get_active
+            // only returns active rows, which always carry an expiry.)
+            verdict.expires_at = approval.expires_at;
         }
     }
 
@@ -561,6 +565,60 @@ rules:
             res.verdict,
             ProtoVerdict::Allow as i32,
             "approval must override to ALLOW"
+        );
+    }
+
+    /// Separation of duties: a pending request does not grant, a self-approval is
+    /// refused, and approval by a different principal makes the exception active
+    /// and releases the cooldown HOLD.
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn sod_request_then_approve_by_other_grants() {
+        let state = test_state().await;
+        let pkg = unique("sod");
+        let ver = "1.0.0";
+        let requester = Uuid::new_v4();
+
+        let req = crate::db::approvals::request(&state.pool, &pkg, ver, requester, "need it", 24)
+            .await
+            .unwrap();
+
+        // A pending request must NOT grant: a recent version stays HELD.
+        let r1 = resolve_one(&state, &pkg, ver, ts_hours_ago(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            r1.verdict,
+            ProtoVerdict::Hold as i32,
+            "a pending request must not grant"
+        );
+
+        // Self-approval is refused (separation of duties).
+        assert!(
+            crate::db::approvals::approve(&state.pool, req.id, requester)
+                .await
+                .is_err(),
+            "self-approval must be rejected"
+        );
+
+        // Approval by a different principal activates the exception.
+        let approver = Uuid::new_v4();
+        crate::db::approvals::approve(&state.pool, req.id, approver)
+            .await
+            .unwrap();
+        let mut cache = crate::cache::VerdictCache::from_conn(
+            state.redis.clone(),
+            state.config.redis.verdict_ttl_secs,
+        );
+        cache.invalidate(&pkg, ver).await.unwrap();
+
+        let r2 = resolve_one(&state, &pkg, ver, ts_hours_ago(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            r2.verdict,
+            ProtoVerdict::Allow as i32,
+            "an approved exception must release the HOLD"
         );
     }
 

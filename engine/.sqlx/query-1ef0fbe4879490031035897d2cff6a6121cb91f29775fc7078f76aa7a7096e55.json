@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, package, version, requester_id, approver_id, justification, expires_at, status, created_at\n        FROM approvals\n        WHERE package = $1\n          AND version = $2\n          AND status = 'active'\n          AND expires_at > NOW()\n        LIMIT 1\n        ",
+  "query": "\n        UPDATE approvals\n        SET status = 'active',\n            approver_id = $2,\n            expires_at = NOW() + make_interval(hours => COALESCE(ttl_hours, 24)::int)\n        WHERE id = $1\n          AND status = 'pending'\n          AND requester_id <> $2\n        RETURNING id, package, version, requester_id, approver_id, justification, expires_at, created_at\n        ",
   "describe": {
     "columns": [
       {
@@ -40,19 +40,14 @@
       },
       {
         "ordinal": 7,
-        "name": "status",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text"
+        "Uuid",
+        "Uuid"
       ]
     },
     "nullable": [
@@ -63,9 +58,8 @@
       true,
       false,
       true,
-      false,
       false
     ]
   },
-  "hash": "ffc231bcd6215556b27b09e4304f343cef4d3f8f3a7fc3919867a5ac48caaf44"
+  "hash": "1ef0fbe4879490031035897d2cff6a6121cb91f29775fc7078f76aa7a7096e55"
 }

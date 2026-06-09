@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE approvals\n        SET status = 'rejected', approver_id = $2, revocation_reason = $3\n        WHERE id = $1 AND status = 'pending'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5b87945c9b2136431c1f193428aec6392289205eea38443ab7682f78291204c9"
+}

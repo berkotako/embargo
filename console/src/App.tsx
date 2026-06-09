@@ -6,6 +6,7 @@ import { ScreenDashboard } from './screens/Dashboard.tsx';
 import { ScreenPolicy } from './screens/Policy.tsx';
 import { ScreenApprovals } from './screens/Approvals.tsx';
 import { ScreenAudit } from './screens/Audit.tsx';
+import { ScreenKnownPackages } from './screens/KnownPackages.tsx';
 import { LoginScreen } from './screens/Login.tsx';
 import { whoami } from './data/api.ts';
 import { handleOidcCallback, hasCredentials, logout } from './lib/auth.ts';
@@ -14,6 +15,7 @@ const NAV = [
   { path: '/quarantine', label: 'Quarantine', icon: '⊘', countKey: 'held' },
   { path: '/dashboard', label: 'Dashboard', icon: '▦' },
   { path: '/policy', label: 'Policy', icon: '⊟' },
+  { path: '/known-packages', label: 'Known Packages', icon: '⛔' },
   { path: '/approvals', label: 'Approvals', icon: '✓', countKey: 'approvals' },
   { path: '/audit', label: 'Audit Log', icon: '≡' },
 ];
@@ -87,6 +89,7 @@ const PAGE_META: Record<string, { title: string; sub: string }> = {
   '/quarantine': { title: 'Quarantine', sub: 'Versions held or denied by policy' },
   '/dashboard': { title: 'Dashboard', sub: 'Signal activity and hold trends' },
   '/policy': { title: 'Policy', sub: 'Per-scope rules — most-specific-wins' },
+  '/known-packages': { title: 'Known Packages', sub: 'Known-malicious blocklist & feed' },
   '/approvals': { title: 'Approvals', sub: 'Time-boxed exception workflow' },
   '/audit': { title: 'Audit Log', sub: 'Tamper-evident, hash-chained log' },
 };
@@ -105,6 +108,7 @@ function Layout({ user }: { user: CurrentUser }) {
             <Route path="/quarantine" element={<ScreenQuarantine user={user} />} />
             <Route path="/dashboard" element={<ScreenDashboard />} />
             <Route path="/policy" element={<ScreenPolicy user={user} />} />
+            <Route path="/known-packages" element={<ScreenKnownPackages user={user} />} />
             <Route path="/approvals" element={<ScreenApprovals user={user} />} />
             <Route path="/audit" element={<ScreenAudit />} />
           </Routes>

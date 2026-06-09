@@ -6,7 +6,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   responder: ['read:verdicts', 'read:policies', 'read:audit', 'read:approvals', 'write:approvals'],
   admin: [
     'read:verdicts', 'read:policies', 'read:audit', 'read:approvals',
-    'write:approvals', 'write:policies', 'write:verdicts',
+    'write:approvals', 'write:policies', 'write:verdicts', 'manage:known-malicious',
   ],
 };
 

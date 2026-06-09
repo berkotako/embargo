@@ -140,21 +140,33 @@ export interface KnownMaliciousEntry {
   package: string;
   version: string;
   source: string;
+  ecosystem: string;
   syncedAt: string;
 }
 
 export interface KnownMaliciousSource {
   source: string;
+  ecosystem: string;
   count: number;
   lastSyncedAt: string;
 }
 
 export interface KnownMaliciousStatus {
-  feedEnabled: boolean;
-  feedSource: string;
-  feedIntervalSecs: number;
   total: number;
   sources: KnownMaliciousSource[];
+}
+
+export interface FeedSource {
+  id: string;
+  name: string;
+  url: string;
+  ecosystem: string;
+  format: string;
+  enabled: boolean;
+  intervalSeconds: number;
+  lastSyncedAt: string | null;
+  lastStatus: string | null;
+  createdAt: string;
 }
 
 export async function getKnownMalicious(search?: string): Promise<KnownMaliciousEntry[]> {
@@ -166,22 +178,48 @@ export async function getKnownMaliciousStatus(): Promise<KnownMaliciousStatus> {
   return get<KnownMaliciousStatus>('/known-malicious/status');
 }
 
-/** Add a manual block. Omit `version` (or pass '*') to block all versions. */
+/** Add a manual npm block. Omit `version` (or pass '*') to block all versions. */
 export async function addKnownMalicious(pkg: string, version?: string): Promise<void> {
   await send<void>('POST', '/known-malicious', { package: pkg, version });
 }
 
-export async function removeKnownMalicious(
-  pkg: string,
-  version: string,
-  source?: string,
-): Promise<void> {
-  await send<void>('POST', '/known-malicious/remove', { package: pkg, version, source });
+export async function removeKnownMalicious(en: KnownMaliciousEntry): Promise<void> {
+  await send<void>('POST', '/known-malicious/remove', {
+    package: en.package,
+    version: en.version,
+    source: en.source,
+    ecosystem: en.ecosystem,
+  });
 }
 
-/** Trigger an immediate feed re-sync (admin). Returns rows written. */
-export async function syncKnownMalicious(): Promise<{ written: number }> {
-  return send<{ written: number }>('POST', '/known-malicious/sync');
+// Feed sources (runtime-managed) ------------------------------------------------
+
+export async function getFeeds(): Promise<FeedSource[]> {
+  return get<FeedSource[]>('/feeds');
+}
+
+export async function addFeed(
+  name: string,
+  url: string,
+  ecosystem: string,
+): Promise<FeedSource> {
+  return send<FeedSource>('POST', '/feeds', { name, url, ecosystem });
+}
+
+export async function updateFeed(
+  id: string,
+  patch: { enabled?: boolean; intervalSeconds?: number },
+): Promise<void> {
+  await send<void>('PATCH', `/feeds/${encodeURIComponent(id)}`, patch);
+}
+
+export async function deleteFeed(id: string): Promise<void> {
+  await send<void>('DELETE', `/feeds/${encodeURIComponent(id)}`);
+}
+
+/** Sync a single feed source now (admin). Returns rows written. */
+export async function syncFeed(id: string): Promise<{ written: number }> {
+  return send<{ written: number }>('POST', `/feeds/${encodeURIComponent(id)}/sync`);
 }
 
 // ---------------------------------------------------------------------------

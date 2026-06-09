@@ -110,51 +110,17 @@ impl AdminService for AdminServiceImpl {
 
     async fn create_approval(
         &self,
-        req: Request<CreateApprovalRequest>,
+        _req: Request<CreateApprovalRequest>,
     ) -> Result<Response<CreateApprovalResponse>, Status> {
-        let r = req.into_inner();
-        // TODO(M1): extract actor from mTLS peer; approver requires 'approve' RBAC permission.
-        let actor_id = Uuid::nil();
-
-        let approval = db::approvals::create(
-            &self.state.pool,
-            &r.package,
-            &r.version,
-            actor_id,
-            actor_id,
-            &r.justification,
-            r.ttl_hours,
-        )
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
-
-        db::audit::append(
-            &self.state.pool,
-            &Actor::System,
-            AuditAction::ApprovalGranted,
-            &AuditTarget::Approval { id: approval.id },
-            None,
-            None,
-        )
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
-
-        use crate::generated::embargo::v1::ApprovalProto;
-        Ok(Response::new(CreateApprovalResponse {
-            approval: Some(ApprovalProto {
-                id: approval.id.to_string(),
-                package: approval.package,
-                version: approval.version,
-                requester_id: approval.requester_id.to_string(),
-                approver_id: approval
-                    .approver_id
-                    .map(|u| u.to_string())
-                    .unwrap_or_default(),
-                justification: approval.justification,
-                expires_at: None,
-                status: "active".into(),
-            }),
-        }))
+        // Granting an approval requires a real requester + a *different* approver
+        // (separation of duties, enforced in db::approvals::approve). Until mTLS
+        // peer identity extraction lands (TODO(M1)), this endpoint has no actor
+        // to attribute the grant to — a nil actor would let any gRPC caller
+        // self-approve. Use the authenticated HTTP facade (/api/approvals).
+        Err(Status::unimplemented(
+            "approvals must go through the authenticated HTTP API (/api/approvals); \
+             gRPC approval creation is disabled until mTLS peer identity is enforced",
+        ))
     }
 
     async fn revoke_approval(

@@ -70,6 +70,12 @@ pub fn parse(gz_bytes: &[u8]) -> Result<VersionArtifact> {
         }
 
         let raw_path = entry.path()?.to_string_lossy().to_string();
+        // Entry paths key the file list and script lookups downstream; a `..`
+        // or absolute path could impersonate package.json or dodge path-based
+        // signals, so reject the tarball outright.
+        if raw_path.starts_with('/') || raw_path.split(['/', '\\']).any(|c| c == "..") {
+            return Err(anyhow!("tarball entry has unsafe path: {raw_path}"));
+        }
         // npm tarballs nest everything under a leading `package/` directory.
         let rel = raw_path
             .strip_prefix("package/")
@@ -122,7 +128,7 @@ pub fn parse(gz_bytes: &[u8]) -> Result<VersionArtifact> {
         }
     }
 
-    let (package, version) = parse_name_version(pkg_json);
+    let (package, version) = parse_name_version(pkg_json)?;
 
     Ok(VersionArtifact {
         package,
@@ -169,19 +175,26 @@ pub fn parse_repository(v: &serde_json::Value) -> Option<String> {
     }
 }
 
-fn parse_name_version(pkg_json: &[u8]) -> (String, String) {
-    let v: serde_json::Value = serde_json::from_slice(pkg_json).unwrap_or_default();
+fn parse_name_version(pkg_json: &[u8]) -> Result<(String, String)> {
+    let v: serde_json::Value = serde_json::from_slice(pkg_json)?;
     let name = v
         .get("name")
         .and_then(|n| n.as_str())
         .unwrap_or("")
+        .trim()
         .to_string();
     let version = v
         .get("version")
         .and_then(|n| n.as_str())
         .unwrap_or("")
+        .trim()
         .to_string();
-    (name, version)
+    // Empty keys would store this artifact's signals under ("", ""), detached
+    // from the verdict computed for the real (package, version) — fail loudly.
+    if name.is_empty() || version.is_empty() {
+        return Err(anyhow!("package.json is missing name or version"));
+    }
+    Ok((name, version))
 }
 
 #[cfg(test)]
@@ -256,6 +269,39 @@ mod tests {
     fn errors_without_package_json() {
         let tgz = make_tarball(&[("index.js", b"x")]);
         assert!(parse(&tgz).is_err());
+    }
+
+    #[test]
+    fn rejects_path_traversal_entries() {
+        // tar::Builder refuses to *write* `..` paths, so forge the header name
+        // bytes directly — exactly what a hand-crafted malicious tarball does.
+        let mut tar_buf = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tar_buf);
+            let body: &[u8] = b"x";
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_mode(0o644);
+            let name = b"package/../escape.js";
+            header.as_gnu_mut().unwrap().name[..name.len()].copy_from_slice(name);
+            header.set_cksum();
+            builder.append(&header, body).unwrap();
+            builder.finish().unwrap();
+        }
+        let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+        gz.write_all(&tar_buf).unwrap();
+        let tgz = gz.finish().unwrap();
+
+        let err = parse(&tgz).unwrap_err().to_string();
+        assert!(err.contains("unsafe path"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_manifest_without_name_or_version() {
+        let tgz = make_tarball(&[("package.json", br#"{"name":"x"}"#.as_slice())]);
+        let err = parse(&tgz).unwrap_err().to_string();
+        assert!(err.contains("missing name or version"), "got: {err}");
     }
 
     #[test]

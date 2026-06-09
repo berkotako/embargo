@@ -105,14 +105,14 @@ pub fn compute_verdict(input: &ResolutionInput<'_>) -> VersionVerdict {
             OnHardSignal::Deny => Verdict::Deny,
             OnHardSignal::Hold => Verdict::Hold,
         };
+        // Always record the chain as a reason — a reviewer must see every
+        // contributor to the verdict, even when cooldown already holds it.
+        reasons.push(HoldReason::SignalChain {
+            chain_id: "composite".into(),
+            score: chain_score,
+        });
         // Only escalate; never relax.
-        if chain_verdict == Verdict::Deny || verdict == Verdict::Allow {
-            reasons.push(HoldReason::SignalChain {
-                chain_id: "composite".into(),
-                score: chain_score,
-            });
-            verdict = escalate(verdict, chain_verdict);
-        }
+        verdict = escalate(verdict, chain_verdict);
     }
 
     // Compute expiry: HOLDs expire when cooldown window closes; DENYs and ALLOWs don't expire.

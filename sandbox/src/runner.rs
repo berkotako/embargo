@@ -111,16 +111,59 @@ fn child_main(cfg: &RunConfig, child_sock: OwnedFd) -> ! {
     }
     drop(child_sock);
 
+    // Bound the blast radius of a malicious install (fork bomb, disk fill,
+    // memory/CPU exhaustion) before handing control to it.
+    apply_rlimits();
+
     // exec the install command; from here the seccomp filter governs connect().
-    let prog = CString::new(cfg.command[0].clone()).unwrap();
-    let argv: Vec<CString> = cfg
-        .command
-        .iter()
-        .map(|a| CString::new(a.clone()).unwrap())
-        .collect();
+    // CString::new fails only on an interior NUL byte; in the post-fork child we
+    // must never panic (it would unwind across the fork), so _exit instead.
+    let prog = match CString::new(cfg.command[0].clone()) {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("embargo-sandbox: command contains an interior NUL byte");
+            unsafe { libc::_exit(126) };
+        }
+    };
+    let mut argv: Vec<CString> = Vec::with_capacity(cfg.command.len());
+    for a in &cfg.command {
+        match CString::new(a.clone()) {
+            Ok(c) => argv.push(c),
+            Err(_) => {
+                eprintln!("embargo-sandbox: argument contains an interior NUL byte");
+                unsafe { libc::_exit(126) };
+            }
+        }
+    }
     let _ = execvp(&prog, &argv);
     eprintln!("embargo-sandbox: exec {} failed", cfg.command[0]);
     unsafe { libc::_exit(127) };
+}
+
+/// Best-effort resource caps applied in the child before exec. These bound a
+/// runaway/malicious install so it can't take down the host: a fork bomb, a
+/// disk-filling write, or memory/CPU exhaustion. We only ever lower a limit
+/// (clamped to the existing hard limit) and never fail the run if a cap can't be
+/// set — this is defense in depth layered on the egress filter and namespaces.
+fn apply_rlimits() {
+    use nix::sys::resource::{getrlimit, setrlimit, Resource};
+    const GIB: u64 = 1024 * 1024 * 1024;
+    // (resource, desired soft cap). Generous enough for a real `npm ci`.
+    let caps = [
+        (Resource::RLIMIT_NPROC, 1024), // processes/threads — fork-bomb guard
+        (Resource::RLIMIT_AS, 4 * GIB), // address space — memory guard
+        (Resource::RLIMIT_FSIZE, 4 * GIB), // max file size — disk-fill guard
+        (Resource::RLIMIT_CPU, 900),    // CPU seconds — runaway guard
+        (Resource::RLIMIT_NOFILE, 4096), // open file descriptors
+    ];
+    for (res, desired) in caps {
+        if let Ok((_, hard)) = getrlimit(res) {
+            let soft = desired.min(hard); // never exceed the hard limit
+            if let Err(e) = setrlimit(res, soft, hard) {
+                eprintln!("embargo-sandbox: setrlimit({res:?}) failed (continuing): {e}");
+            }
+        }
+    }
 }
 
 /// Enter a new user namespace mapping the current uid/gid to root (granting

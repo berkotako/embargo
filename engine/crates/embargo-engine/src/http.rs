@@ -54,6 +54,8 @@ pub fn router(state: EngineState) -> Router {
         .route("/api/policies", get(get_policies))
         .route("/api/policies/dryrun", get(get_dryrun))
         .route("/api/approvals", get(list_approvals).post(create_approval))
+        .route("/api/approvals/{id}/approve", post(approve_approval))
+        .route("/api/approvals/{id}/reject", post(reject_approval))
         .route("/api/approvals/{id}/revoke", post(revoke_approval))
         .route("/api/audit", get(list_audit))
         .route("/api/dashboard", get(get_dashboard))
@@ -361,27 +363,35 @@ struct ApprovalDto {
     created_at: String,
 }
 
+fn approval_to_dto(a: db::approvals::Approval) -> ApprovalDto {
+    ApprovalDto {
+        id: a.id.to_string(),
+        package: a.package,
+        version: a.version,
+        requester_id: a.requester_id.to_string(),
+        approver_id: a.approver_id.map(|u| u.to_string()),
+        justification: a.justification,
+        expires_at: a.expires_at.map(|d| d.to_rfc3339()),
+        status: a.status.as_str().into(),
+        created_at: a.created_at.to_rfc3339(),
+    }
+}
+
 async fn list_approvals(
     State(state): State<EngineState>,
     user: AuthUser,
 ) -> ApiResult<Vec<ApprovalDto>> {
     require(&user, Permission::ReadApprovals)?;
     let rows = db::approvals::list(&state.pool, 200).await?;
-    let dto = rows
-        .into_iter()
-        .map(|a| ApprovalDto {
-            id: a.id.to_string(),
-            package: a.package,
-            version: a.version,
-            requester_id: a.requester_id.to_string(),
-            approver_id: Some(a.approver_id.to_string()),
-            justification: a.justification,
-            expires_at: Some(a.expires_at.to_rfc3339()),
-            status: a.status.as_str().into(),
-            created_at: a.created_at.to_rfc3339(),
-        })
-        .collect();
-    Ok(Json(dto))
+    Ok(Json(rows.into_iter().map(approval_to_dto).collect()))
+}
+
+fn actor(user: &AuthUser) -> embargo_core::audit::Actor {
+    embargo_core::audit::Actor::User {
+        id: user_uuid(&user.sub),
+        email: user.email.clone(),
+        role: user.role.as_str().into(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -393,48 +403,99 @@ struct CreateApprovalBody {
     ttl_hours: u64,
 }
 
+/// Open a *pending* exception request (separation of duties). A responder may
+/// request; a different admin must approve before it grants.
 async fn create_approval(
     State(state): State<EngineState>,
     user: AuthUser,
     Json(body): Json<CreateApprovalBody>,
 ) -> ApiResult<ApprovalDto> {
     require(&user, Permission::WriteApprovals)?;
-    // The requester and approver is the authenticated principal.
-    let actor_id = user_uuid(&user.sub);
-    let a = db::approvals::create(
+    let requester = user_uuid(&user.sub);
+    let a = db::approvals::request(
         &state.pool,
         &body.package,
         &body.version,
-        actor_id,
-        actor_id,
+        requester,
         &body.justification,
         body.ttl_hours,
     )
     .await?;
     db::audit::append(
         &state.pool,
-        &embargo_core::audit::Actor::User {
-            id: actor_id,
-            email: user.email.clone(),
-            role: user.role.as_str().into(),
-        },
-        embargo_core::audit::AuditAction::ApprovalGranted,
+        &actor(&user),
+        embargo_core::audit::AuditAction::ApprovalRequested,
         &embargo_core::audit::AuditTarget::Approval { id: a.id },
         None,
         Some(&json!({ "package": body.package, "version": body.version })),
     )
     .await?;
-    Ok(Json(ApprovalDto {
-        id: a.id.to_string(),
-        package: a.package,
-        version: a.version,
-        requester_id: a.requester_id.to_string(),
-        approver_id: Some(a.approver_id.to_string()),
-        justification: a.justification,
-        expires_at: Some(a.expires_at.to_rfc3339()),
-        status: "active".into(),
-        created_at: a.created_at.to_rfc3339(),
-    }))
+    Ok(Json(approval_to_dto(a)))
+}
+
+/// Approve a pending request — admin-only; the engine rejects self-approval.
+async fn approve_approval(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> ApiResult<ApprovalDto> {
+    require(&user, Permission::ApproveExceptions)?;
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid approval id".into()))?;
+    let approver = user_uuid(&user.sub);
+    let a = db::approvals::approve(&state.pool, uuid, approver)
+        .await
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
+    db::audit::append(
+        &state.pool,
+        &actor(&user),
+        embargo_core::audit::AuditAction::ApprovalGranted,
+        &embargo_core::audit::AuditTarget::Approval { id: uuid },
+        None,
+        Some(&json!({ "package": a.package, "version": a.version })),
+    )
+    .await?;
+    Ok(Json(approval_to_dto(a)))
+}
+
+#[derive(Deserialize)]
+struct RejectBody {
+    reason: Option<String>,
+}
+
+/// Reject a pending request — admin-only.
+async fn reject_approval(
+    State(state): State<EngineState>,
+    user: AuthUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<RejectBody>,
+) -> Result<StatusCode, ApiError> {
+    require(&user, Permission::ApproveExceptions)?;
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid approval id".into()))?;
+    let rejected = db::approvals::reject(
+        &state.pool,
+        uuid,
+        user_uuid(&user.sub),
+        body.reason.as_deref().unwrap_or("rejected via console"),
+    )
+    .await?;
+    if !rejected {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "request is not pending".into(),
+        ));
+    }
+    db::audit::append(
+        &state.pool,
+        &actor(&user),
+        embargo_core::audit::AuditAction::ApprovalRejected,
+        &embargo_core::audit::AuditTarget::Approval { id: uuid },
+        None,
+        None,
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -459,11 +520,7 @@ async fn revoke_approval(
     .await?;
     db::audit::append(
         &state.pool,
-        &embargo_core::audit::Actor::User {
-            id: user_uuid(&user.sub),
-            email: user.email.clone(),
-            role: user.role.as_str().into(),
-        },
+        &actor(&user),
         embargo_core::audit::AuditAction::ApprovalRevoked,
         &embargo_core::audit::AuditTarget::Approval { id: uuid },
         None,
@@ -1002,6 +1059,7 @@ rules:
             osv_endpoint: "https://api.osv.dev".into(),
             bootstrap_policy_path: String::new(),
             auth: crate::config::AuthConfig::default(),
+            provenance: crate::config::ProvenanceConfig::default(),
         };
         EngineState::new(
             pool,
@@ -1010,6 +1068,7 @@ rules:
             std::sync::Arc::new(crate::registry::MockRegistryClient::default()),
             std::sync::Arc::new(crate::advisory::MockAdvisoryClient::default()),
             auth,
+            std::sync::Arc::new(crate::provenance::sigstore::ProvenancePolicy::default()),
         )
     }
 

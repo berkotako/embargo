@@ -104,6 +104,95 @@ pub fn attestations_json(repo: &str, workflow: &str) -> serde_json::Value {
     })
 }
 
+/// Build a *cryptographically signed* npm Sigstore provenance bundle plus the
+/// matching trust policy, for end-to-end provenance-verification tests.
+///
+/// Generates a self-signed test CA, a leaf certificate signed by it carrying the
+/// workflow URI SAN and the Fulcio OIDC-issuer extension, and a DSSE envelope
+/// (ECDSA P-256 / SHA-256) over the SLSA statement signed by the leaf key. The
+/// returned policy trusts the test CA and the given issuer, so
+/// `sigstore::verify_attestations` accepts the bundle.
+pub fn signed_provenance(
+    repo: &str,
+    workflow: &str,
+    issuer: &str,
+) -> (
+    serde_json::Value,
+    crate::provenance::sigstore::ProvenancePolicy,
+) {
+    use p256::ecdsa::{signature::Signer, SigningKey};
+    use p256::pkcs8::EncodePrivateKey;
+    use rcgen::{
+        BasicConstraints, CertificateParams, CustomExtension, DnType, IsCa, Issuer, KeyPair,
+        SanType,
+    };
+
+    // Self-signed test CA standing in for Fulcio.
+    let ca_key = KeyPair::generate().unwrap();
+    let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca_params
+        .distinguished_name
+        .push(DnType::CommonName, "Embargo Test CA");
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+
+    // Leaf signing key (P-256), reused both for the cert and the DSSE signature.
+    let leaf_sk = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    let leaf_pkcs8 = leaf_sk.to_pkcs8_der().unwrap();
+    let leaf_kp = KeyPair::try_from(leaf_pkcs8.as_bytes()).unwrap();
+
+    let san_uri = format!("https://github.com/{repo}/{workflow}@refs/heads/main");
+    let mut leaf_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    leaf_params.subject_alt_names = vec![SanType::URI(san_uri.parse().unwrap())];
+    // Fulcio OIDC issuer extension (v1, raw string): 1.3.6.1.4.1.57264.1.1.
+    leaf_params
+        .custom_extensions
+        .push(CustomExtension::from_oid_content(
+            &[1, 3, 6, 1, 4, 1, 57264, 1, 1],
+            issuer.as_bytes().to_vec(),
+        ));
+    let issuer_obj = Issuer::from_params(&ca_params, &ca_key);
+    let leaf_cert = leaf_params.signed_by(&leaf_kp, &issuer_obj).unwrap();
+    let leaf_der = leaf_cert.der().to_vec();
+
+    // DSSE envelope over the SLSA provenance statement.
+    let statement = serde_json::json!({
+        "_type": "https://in-toto.io/Statement/v1",
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "subject": [{ "name": "pkg", "digest": { "sha512": "abc" } }],
+        "predicate": { "buildDefinition": { "externalParameters": {
+            "workflow": { "repository": format!("https://github.com/{repo}"), "path": workflow }
+        } } }
+    });
+    let payload = serde_json::to_vec(&statement).unwrap();
+    let payload_type = "application/vnd.in-toto+json";
+    let pae = crate::provenance::sigstore::dsse_pae(payload_type, &payload);
+    let sig: p256::ecdsa::Signature = leaf_sk.sign(&pae);
+
+    let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+    let attestation = serde_json::json!({
+        "attestations": [{
+            "bundle": {
+                "dsseEnvelope": {
+                    "payloadType": payload_type,
+                    "payload": b64(&payload),
+                    "signatures": [{ "sig": b64(sig.to_der().as_bytes()) }]
+                },
+                "verificationMaterial": {
+                    "certificate": { "rawBytes": b64(&leaf_der) }
+                }
+            }
+        }]
+    });
+
+    let policy = crate::provenance::sigstore::ProvenancePolicy::from_pem(
+        &ca_cert.pem(),
+        vec![issuer.to_string()],
+    )
+    .unwrap();
+    (attestation, policy)
+}
+
 /// A registry serving a single benign version 1.0.0 from `github.com/acme/demo`,
 /// optionally with a matching provenance attestation.
 pub fn benign_registry(with_provenance: bool) -> MockRegistryClient {

@@ -77,7 +77,34 @@ export class EngineClient {
       );
     });
   }
+
+  /**
+   * Resolve a single (package, version) to its verdict. Used by the tarball
+   * gate. No publish time is sent: the engine returns the verdict already
+   * computed during packument resolution (the tarball fetch must enforce exactly
+   * what the packument rewrite decided).
+   */
+  async resolveVersion(pkg: string, version: string): Promise<VersionVerdict> {
+    return new Promise((resolve, reject) => {
+      this.client.resolve(
+        { versionInfo: { package: pkg, version }, callerService: 'gateway-tarball' },
+        (err: grpc.ServiceError | null, res: ResolveProtoResponse) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve({
+            verdict: protoVerdictToStr(res.verdict),
+            reasons: res.reasons ?? [],
+          });
+        },
+      );
+    });
+  }
 }
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- proto shape
+type ResolveProtoResponse = any;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- proto shape
 type ResolvePackumentProtoResponse = any;

@@ -45,6 +45,21 @@ impl EngineService for EngineServiceImpl {
         tracing::Span::current().record("pkg", &vi.package);
         tracing::Span::current().record("ver", &vi.version);
 
+        // Tarball-gate / publish-time-less callers (the L1 direct-tarball gate and
+        // the L2 admission gate when it has no publish time) can't recompute
+        // cooldown. Return the verdict already computed during packument
+        // resolution so the tarball fetch enforces exactly what the packument
+        // rewrite decided — closing the direct-tarball bypass. On a true miss we
+        // fall through to compute, which fail-safes to HOLD without a publish time.
+        if vi.published_at.is_none() {
+            if let Some(persisted) = db::verdicts::get(&self.state.pool, &vi.package, &vi.version)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?
+            {
+                return Ok(Response::new(verdict_to_proto(persisted)));
+            }
+        }
+
         let verdict = resolve_one(&self.state, &vi.package, &vi.version, vi.published_at)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -167,9 +182,12 @@ async fn resolve_one(
         .resolve(package)
         .ok_or_else(|| anyhow::anyhow!("no policy rule matched {}", package))?;
     let fast_tracked = resolver.is_fast_tracked(package);
+    // Fail safe on a missing/unparseable publish time: treat it as just-published
+    // so the version HOLDs for the full cooldown rather than slipping through as
+    // "aged". A stripped `time` entry must never bypass cooldown.
     let pub_at = published_at
         .and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32))
-        .unwrap_or_else(|| Utc::now() - chrono::Duration::hours(rule.cooldown_hours as i64 + 1));
+        .unwrap_or_else(Utc::now);
 
     // Signals and provenance are produced out-of-band by the extractor.
     let mut signals = db::signals::get_for_version(&state.pool, package, version).await?;
@@ -196,16 +214,26 @@ async fn resolve_one(
     // 3b. Exception workflow: an active, unexpired approval for this exact
     // (package, version) overrides a HOLD/DENY to ALLOW. Approvals are
     // human-granted, time-boxed, and audited (see admin_svc::create_approval).
-    if verdict.verdict != Verdict::Allow {
+    //
+    // Hard external blocks are NOT releasable this way: an advisory/CVE match, a
+    // known-malicious feed listing, or an explicit manual denial stays DENY even
+    // with an active approval. The exception workflow may only release cooldown,
+    // provenance, and behavioral-signal holds — never an external malicious fact.
+    let hard_blocked = verdict.reasons.iter().any(|r| r.is_hard_block());
+    if verdict.verdict != Verdict::Allow && !hard_blocked {
         if let Some(approval) = db::approvals::get_active(&state.pool, package, version).await? {
             verdict.verdict = Verdict::Allow;
             verdict.reasons.push(HoldReason::ApprovedException {
-                approver: approval.approver_id.to_string(),
-                reason: format!("approved exception (expires {})", approval.expires_at),
+                approver: approval
+                    .approver_id
+                    .map(|u| u.to_string())
+                    .unwrap_or_default(),
+                reason: format!("approved exception (expires {:?})", approval.expires_at),
             });
             // An approval-overridden ALLOW expires when the approval does, so the
-            // gate re-closes automatically once the exception lapses.
-            verdict.expires_at = Some(approval.expires_at);
+            // gate re-closes automatically once the exception lapses. (get_active
+            // only returns active rows, which always carry an expiry.)
+            verdict.expires_at = approval.expires_at;
         }
     }
 
@@ -231,6 +259,7 @@ fn spawn_extraction(state: EngineState, package: String, version: String) {
         match crate::extractor::extract_and_store(
             state.registry.as_ref(),
             state.advisory.as_ref(),
+            state.provenance.as_ref(),
             &state.pool,
             &package,
             &version,
@@ -378,6 +407,7 @@ rules:
             osv_endpoint: "https://api.osv.dev".into(),
             bootstrap_policy_path: String::new(),
             auth: crate::config::AuthConfig::default(),
+            provenance: crate::config::ProvenanceConfig::default(),
         };
 
         EngineState::new(
@@ -387,6 +417,7 @@ rules:
             registry,
             advisory,
             std::sync::Arc::new(crate::auth::AuthState::disabled()),
+            std::sync::Arc::new(crate::provenance::sigstore::ProvenancePolicy::default()),
         )
     }
 
@@ -537,6 +568,163 @@ rules:
         );
     }
 
+    /// Separation of duties: a pending request does not grant, a self-approval is
+    /// refused, and approval by a different principal makes the exception active
+    /// and releases the cooldown HOLD.
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn sod_request_then_approve_by_other_grants() {
+        let state = test_state().await;
+        let pkg = unique("sod");
+        let ver = "1.0.0";
+        let requester = Uuid::new_v4();
+
+        let req = crate::db::approvals::request(&state.pool, &pkg, ver, requester, "need it", 24)
+            .await
+            .unwrap();
+
+        // A pending request must NOT grant: a recent version stays HELD.
+        let r1 = resolve_one(&state, &pkg, ver, ts_hours_ago(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            r1.verdict,
+            ProtoVerdict::Hold as i32,
+            "a pending request must not grant"
+        );
+
+        // Self-approval is refused (separation of duties).
+        assert!(
+            crate::db::approvals::approve(&state.pool, req.id, requester)
+                .await
+                .is_err(),
+            "self-approval must be rejected"
+        );
+
+        // Approval by a different principal activates the exception.
+        let approver = Uuid::new_v4();
+        crate::db::approvals::approve(&state.pool, req.id, approver)
+            .await
+            .unwrap();
+        let mut cache = crate::cache::VerdictCache::from_conn(
+            state.redis.clone(),
+            state.config.redis.verdict_ttl_secs,
+        );
+        cache.invalidate(&pkg, ver).await.unwrap();
+
+        let r2 = resolve_one(&state, &pkg, ver, ts_hours_ago(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            r2.verdict,
+            ProtoVerdict::Allow as i32,
+            "an approved exception must release the HOLD"
+        );
+    }
+
+    /// An active approval releases a cooldown HOLD (the intended exception
+    /// workflow) but must NOT release a known-malicious feed DENY — a hard
+    /// external block stays DENY even with an approval covering the same version.
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn approval_cannot_release_known_malicious() {
+        let state = test_state().await;
+        let pkg = unique("km-approved");
+        let ver = "1.0.0";
+        let source = format!("itest-{pkg}");
+        crate::db::known_malicious::replace_source(
+            &state.pool,
+            &source,
+            "npm",
+            &[(pkg.clone(), ver.to_string())],
+        )
+        .await
+        .unwrap();
+
+        // Grant a time-boxed approval for the exact version a responder might use
+        // to try to force it through.
+        crate::db::approvals::create(
+            &state.pool,
+            &pkg,
+            ver,
+            Uuid::nil(),
+            Uuid::nil(),
+            "itest exception",
+            24,
+        )
+        .await
+        .unwrap();
+
+        let r = resolve_one(&state, &pkg, ver, ts_hours_ago(500))
+            .await
+            .unwrap();
+        assert_eq!(
+            r.verdict,
+            ProtoVerdict::Deny as i32,
+            "approval must not release a known-malicious DENY"
+        );
+    }
+
+    /// The tarball gate calls Resolve with no publish time. The engine must
+    /// return the verdict persisted during packument resolution (here a DENY),
+    /// so a direct tarball fetch enforces exactly what the packument rewrite did.
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn resolve_without_publish_time_returns_persisted_verdict() {
+        use crate::generated::embargo::v1::{ResolveRequest, VersionInfo};
+        let state = test_state().await;
+        let pkg = unique("tarball-gate");
+        let ver = "1.0.0";
+
+        // Seed the persisted DENY a prior packument resolution would have written.
+        let denied = embargo_core::types::VersionVerdict {
+            package: pkg.clone(),
+            version: ver.into(),
+            verdict: Verdict::Deny,
+            reasons: vec![HoldReason::KnownMalicious {
+                source: "itest".into(),
+            }],
+            signals: vec![],
+            provenance: None,
+            computed_at: Utc::now(),
+            expires_at: None,
+        };
+        crate::db::verdicts::upsert(&state.pool, &denied)
+            .await
+            .unwrap();
+
+        let svc = EngineServiceImpl::new(state.clone());
+        let req = tonic::Request::new(ResolveRequest {
+            version_info: Some(VersionInfo {
+                package: pkg.clone(),
+                version: ver.into(),
+                published_at: None,
+            }),
+            caller_service: "gateway-tarball".into(),
+        });
+        let resp = svc.resolve(req).await.unwrap().into_inner();
+        assert_eq!(
+            resp.verdict,
+            ProtoVerdict::Deny as i32,
+            "tarball-gate resolve must return the persisted DENY"
+        );
+    }
+
+    /// A version with no publish timestamp must HOLD for cooldown (fail safe),
+    /// not slip through as "aged".
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn missing_publish_time_holds_for_cooldown() {
+        let state = test_state().await;
+        let pkg = unique("notime");
+        let res = resolve_one(&state, &pkg, "1.0.0", None).await.unwrap();
+        assert_eq!(
+            res.verdict,
+            ProtoVerdict::Hold as i32,
+            "missing publish time must HOLD, never bypass cooldown"
+        );
+    }
+
     /// Full pipeline: extractor fetches the malicious tarball (vs its benign
     /// predecessor), detects the stealer chain, stores the signals, and the
     /// subsequent resolve escalates the cooldown HOLD to a permanent DENY.
@@ -552,6 +740,7 @@ rules:
         let signals = crate::extractor::extract_and_store(
             state.registry.as_ref(),
             state.advisory.as_ref(),
+            state.provenance.as_ref(),
             &state.pool,
             &pkg,
             ver,
@@ -603,6 +792,7 @@ rules:
         crate::extractor::extract_and_store(
             state.registry.as_ref(),
             state.advisory.as_ref(),
+            state.provenance.as_ref(),
             &state.pool,
             &pkg,
             ver,
@@ -625,19 +815,31 @@ rules:
         );
     }
 
-    /// require_provenance gate: a version with a valid, matching attestation
-    /// passes the gate and (aged, no signals) resolves to ALLOW.
+    /// require_provenance gate: a version with a cryptographically valid,
+    /// identity-bound attestation passes the gate and (aged, no signals) ALLOWs.
+    /// Exercises the full Sigstore path: DSSE signature + Fulcio chain + identity.
     #[tokio::test]
     #[ignore = "requires DATABASE_URL + Redis"]
     async fn provenance_verified_allows() {
-        let registry = std::sync::Arc::new(crate::testutil::benign_registry(true));
-        let state = test_state_with(registry).await;
+        // A signed bundle for github.com/acme/demo + the trust policy that accepts
+        // its (test) CA and OIDC issuer.
+        let (attestation, policy) = crate::testutil::signed_provenance(
+            "acme/demo",
+            ".github/workflows/release.yml",
+            "https://token.actions.githubusercontent.com",
+        );
+        let mut registry = crate::testutil::benign_registry(false);
+        registry.attestation = Some(attestation);
+        let mut state = test_state_with(std::sync::Arc::new(registry)).await;
+        state.provenance = std::sync::Arc::new(policy);
+
         let pkg = unique("prov");
         let ver = "1.0.0";
 
         crate::extractor::extract_and_store(
             state.registry.as_ref(),
             state.advisory.as_ref(),
+            state.provenance.as_ref(),
             &state.pool,
             &pkg,
             ver,
@@ -651,7 +853,7 @@ rules:
         assert_eq!(
             r.verdict,
             ProtoVerdict::Allow as i32,
-            "verified provenance + aged version must ALLOW"
+            "cryptographically verified provenance + aged version must ALLOW"
         );
     }
 
@@ -678,6 +880,7 @@ rules:
         let signals = crate::extractor::extract_and_store(
             state.registry.as_ref(),
             state.advisory.as_ref(),
+            state.provenance.as_ref(),
             &state.pool,
             &pkg,
             ver,

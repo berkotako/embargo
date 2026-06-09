@@ -24,9 +24,12 @@ pub struct EngineState {
     pub advisory: Arc<dyn AdvisoryClient>,
     /// Admin facade authentication + RBAC state.
     pub auth: Arc<AuthState>,
+    /// Cryptographic provenance trust policy used by the extractor.
+    pub provenance: Arc<crate::provenance::sigstore::ProvenancePolicy>,
 }
 
 impl EngineState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: PgPool,
         redis: redis::aio::MultiplexedConnection,
@@ -34,6 +37,7 @@ impl EngineState {
         registry: Arc<dyn RegistryClient>,
         advisory: Arc<dyn AdvisoryClient>,
         auth: Arc<AuthState>,
+        provenance: Arc<crate::provenance::sigstore::ProvenancePolicy>,
     ) -> Self {
         Self {
             pool,
@@ -42,6 +46,7 @@ impl EngineState {
             registry,
             advisory,
             auth,
+            provenance,
         }
     }
 }

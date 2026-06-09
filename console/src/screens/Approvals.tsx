@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { Approval, CurrentUser } from '../types/index.ts';
-import { getApprovals, revokeApproval } from '../data/api.ts';
+import {
+  approveApproval,
+  getApprovals,
+  rejectApproval,
+  revokeApproval,
+} from '../data/api.ts';
 import { EmptyState } from '../components/EmptyState.tsx';
 import { relativeTime, shortDate } from '../lib/format.ts';
 import { can } from '../lib/rbac.ts';
@@ -12,23 +17,55 @@ interface Props {
 export function ScreenApprovals({ user }: Props) {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [loading, setLoading] = useState(true);
-  const [revoking, setRevoking] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const canApprove = can(user.role, 'write:approvals');
+  // Responders can revoke active exceptions; only admins approve/reject pending
+  // requests (separation of duties — the engine also forbids self-approval).
+  const canRevoke = can(user.role, 'write:approvals');
+  const canApprove = can(user.role, 'approve:exceptions');
 
-  useEffect(() => {
+  function reload() {
     getApprovals().then((a) => {
       setApprovals(a);
       setLoading(false);
     });
-  }, []);
+  }
+
+  useEffect(reload, []);
 
   async function handleRevoke(id: string) {
-    setRevoking(id);
+    setBusy(id);
     await revokeApproval(id, 'Revoked via console');
     setApprovals((prev) => prev.filter((a) => a.id !== id));
-    setRevoking(null);
+    setBusy(null);
   }
+
+  async function handleApprove(id: string) {
+    setBusy(id);
+    setError(null);
+    try {
+      await approveApproval(id);
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'approval failed');
+    }
+    setBusy(null);
+  }
+
+  async function handleReject(id: string) {
+    setBusy(id);
+    setError(null);
+    try {
+      await rejectApproval(id, 'Rejected via console');
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'reject failed');
+    }
+    setBusy(null);
+  }
+
+  const showActions = canRevoke || canApprove;
 
   if (loading) {
     return <div className="content-pad"><div className="skel skel-line" style={{ width: 300, height: 20 }} /></div>;
@@ -46,6 +83,7 @@ export function ScreenApprovals({ user }: Props) {
     <div className="content-pad fade-in">
       <div className="tbl-meta">
         <span><b>{approvals.length}</b> approvals</span>
+        {error && <span className="dim" style={{ color: 'var(--deny, #c0392b)' }}>{error}</span>}
       </div>
       <div className="tbl-wrap">
         <table className="tbl">
@@ -56,7 +94,7 @@ export function ScreenApprovals({ user }: Props) {
               <th>Justification</th>
               <th>Expires</th>
               <th>Created</th>
-              {canApprove && <th />}
+              {showActions && <th />}
             </tr>
           </thead>
           <tbody className="stagger">
@@ -80,17 +118,37 @@ export function ScreenApprovals({ user }: Props) {
                 </td>
                 <td className="dim mono">{a.expiresAt ? shortDate(a.expiresAt) : '—'}</td>
                 <td className="dim">{relativeTime(a.createdAt)}</td>
-                {canApprove && (
+                {showActions && (
                   <td>
-                    {a.status === 'active' && (
-                      <button
-                        className="btn btn-sm btn-deny"
-                        disabled={revoking === a.id}
-                        onClick={() => handleRevoke(a.id)}
-                      >
-                        {revoking === a.id ? '…' : 'Revoke'}
-                      </button>
-                    )}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {a.status === 'pending' && canApprove && (
+                        <>
+                          <button
+                            className="btn btn-sm btn-allow"
+                            disabled={busy === a.id}
+                            onClick={() => handleApprove(a.id)}
+                          >
+                            {busy === a.id ? '…' : 'Approve'}
+                          </button>
+                          <button
+                            className="btn btn-sm btn-deny"
+                            disabled={busy === a.id}
+                            onClick={() => handleReject(a.id)}
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      {a.status === 'active' && canRevoke && (
+                        <button
+                          className="btn btn-sm btn-deny"
+                          disabled={busy === a.id}
+                          onClick={() => handleRevoke(a.id)}
+                        >
+                          {busy === a.id ? '…' : 'Revoke'}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 )}
               </tr>

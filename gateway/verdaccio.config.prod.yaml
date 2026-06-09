@@ -31,5 +31,16 @@ filters:
     # stays shut rather than failing open.
     fail-closed: true
 
+# The same plugin also gates direct tarball fetches (`npm ci` from a lockfile),
+# which bypass packument resolution. Fail-closed in production.
+middlewares:
+  embargo:
+    engine-addr: engine:50051
+    console-url: http://localhost:4000
+    tls-cert: /certs/gateway.crt
+    tls-key: /certs/gateway.key
+    tls-ca: /certs/ca.crt
+    fail-closed: true
+
 log: { type: stdout, format: json, level: info }
 listen: 0.0.0.0:4873

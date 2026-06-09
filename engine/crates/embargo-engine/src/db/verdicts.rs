@@ -19,7 +19,7 @@ pub async fn upsert(pool: &PgPool, v: &VersionVerdict) -> Result<()> {
         Uuid::new_v4(),
         v.package,
         v.version,
-        v.verdict as i16,
+        verdict_to_int(v.verdict),
         serde_json::to_value(&v.reasons)?,
         serde_json::to_value(&v.signals)?,
         // Store SQL NULL (not JSON `null`) when there is no provenance, so the
@@ -77,7 +77,7 @@ pub async fn list_by_verdict(
         ORDER BY computed_at DESC
         LIMIT $2 OFFSET $3
         "#,
-        verdict as i16,
+        verdict_to_int(verdict),
         limit,
         offset,
     )
@@ -101,6 +101,18 @@ pub async fn list_by_verdict(
             })
         })
         .collect()
+}
+
+/// Canonical (de)serialization for the `verdicts.verdict` SMALLINT column.
+/// The schema documents `1=ALLOW 2=HOLD 3=DENY` — use these helpers everywhere
+/// rather than `as i16` (the Rust enum discriminants are 0/1/2 and would not
+/// round-trip through `int_to_verdict`).
+fn verdict_to_int(v: Verdict) -> i16 {
+    match v {
+        Verdict::Allow => 1,
+        Verdict::Hold => 2,
+        Verdict::Deny => 3,
+    }
 }
 
 fn int_to_verdict(v: i16) -> Result<Verdict> {

@@ -38,7 +38,11 @@ pub enum Permission {
     ReadPolicies,
     ReadAudit,
     ReadApprovals,
+    /// Open/revoke an exception *request* (responder + admin).
     WriteApprovals,
+    /// Approve or reject a pending request — admin-only, and the engine also
+    /// enforces that the approver is not the requester (separation of duties).
+    ApproveExceptions,
     /// Add/modify/remove watchlist tracking targets (admin-only).
     ManageWatchlist,
     /// Manage the known-malicious blocklist + trigger feed syncs (admin-only).

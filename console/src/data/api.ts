@@ -98,6 +98,10 @@ export async function getApprovals(): Promise<Approval[]> {
   return get<Approval[]>('/approvals');
 }
 
+/**
+ * Open a *pending* exception request (separation of duties). It does not grant
+ * until a different admin approves it via {@link approveApproval}.
+ */
 export async function createApproval(
   pkg: string,
   version: string,
@@ -110,6 +114,16 @@ export async function createApproval(
     justification,
     ttlHours,
   });
+}
+
+/** Approve a pending request (admin-only; the engine rejects self-approval). */
+export async function approveApproval(id: string): Promise<Approval> {
+  return send<Approval>('POST', `/approvals/${encodeURIComponent(id)}/approve`);
+}
+
+/** Reject a pending request (admin-only). */
+export async function rejectApproval(id: string, reason: string): Promise<void> {
+  await send<void>('POST', `/approvals/${encodeURIComponent(id)}/reject`, { reason });
 }
 
 export async function revokeApproval(id: string, reason: string): Promise<void> {

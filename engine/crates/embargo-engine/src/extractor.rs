@@ -7,54 +7,61 @@
 //! This never runs on the resolve hot path — it is invoked out-of-band during
 //! the HOLD window (or by a queue worker).
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use embargo_core::signals::{extract_signals, VersionArtifact};
 use embargo_core::types::{Provenance, Signal};
 use sqlx::PgPool;
 use tracing::{info, instrument};
 
 use crate::advisory::{self, AdvisoryClient};
+use crate::provenance::sigstore::ProvenancePolicy;
 use crate::registry::{self, Packument, RegistryClient};
 use crate::{db, tarball};
 
 /// Fetch + analyze `package@version`, persist its signals, and return them.
-#[instrument(skip(registry, advisory, pool), fields(pkg = package, ver = version))]
+#[instrument(skip(registry, advisory, provenance, pool), fields(pkg = package, ver = version))]
 pub async fn extract_and_store(
     registry: &dyn RegistryClient,
     advisory: &dyn AdvisoryClient,
+    provenance: &ProvenancePolicy,
     pool: &PgPool,
     package: &str,
     version: &str,
 ) -> Result<Vec<Signal>> {
     let packument = registry.packument(package).await?;
 
-    let (current, provenance) = build_artifact(registry, &packument, package, version).await?;
+    let (current, prov_verdict) =
+        build_artifact(registry, provenance, &packument, package, version).await?;
 
     // The immediately-preceding published version, for diff-based signals.
     let prior = match registry::prior_version(&packument, version) {
-        Some(pv) => Some(build_artifact(registry, &packument, package, &pv).await?.0),
+        Some(pv) => Some(
+            build_artifact(registry, provenance, &packument, package, &pv)
+                .await?
+                .0,
+        ),
         None => None,
     };
 
     let mut signals = extract_signals(&current, prior.as_ref());
 
     // Advisory feed match → critical advisory_match signal (auto-DENY). A feed
-    // error must not let a version through, but also must not block all
-    // extraction: log and continue with the behavioral signals we have.
-    match advisory.query(package, version).await {
-        Ok(advisories) => {
-            for adv in &advisories {
-                info!(advisory = %adv.id, "advisory match");
-                signals.push(advisory::to_signal(adv));
-            }
-        }
-        Err(e) => tracing::warn!(error = %e, "advisory feed query failed; skipping advisory match"),
+    // error must NOT finalize the version as advisory-clean: abort extraction so
+    // the version stays HELD (pending) and is retried, rather than persisting a
+    // verdict that could later flip to ALLOW while a real advisory went unseen.
+    let advisories = advisory
+        .query(package, version)
+        .await
+        .context("advisory feed query failed; not finalizing extraction")?;
+    for adv in &advisories {
+        info!(advisory = %adv.id, "advisory match");
+        signals.push(advisory::to_signal(adv));
     }
 
-    info!(count = signals.len(), provenance = ?provenance, "extracted signals");
+    info!(count = signals.len(), provenance = ?prov_verdict, "extracted signals");
 
     db::signals::replace_for_version(pool, package, version, &signals).await?;
-    db::provenance::set(pool, package, version, &provenance).await?;
+    db::provenance::set(pool, package, version, &prov_verdict).await?;
     Ok(signals)
 }
 
@@ -62,6 +69,7 @@ pub async fn extract_and_store(
 /// provenance) and return it alongside the `Provenance` verdict to persist.
 async fn build_artifact(
     client: &dyn RegistryClient,
+    policy: &ProvenancePolicy,
     packument: &Packument,
     package: &str,
     version: &str,
@@ -88,13 +96,30 @@ async fn build_artifact(
     artifact.publisher.maintainers = meta.maintainers.clone();
     artifact.republish_burst = registry::republish_burst(packument, version);
 
-    // Provenance: fetch + verify the npm attestation, feeding both the signal
-    // pipeline (via the artifact) and the require_provenance gate (via the
-    // returned verdict).
+    // Provenance: fetch the npm attestation and verify it cryptographically
+    // (DSSE signature + Fulcio chain + identity) against the trust policy. The
+    // result feeds both the require_provenance gate (the returned verdict) and
+    // the signal pipeline (the informational source repo). The self-asserted
+    // payload repo is only used for the signal hint, never to grant `Verified`.
     let atts = client.attestations(package, version).await?;
-    let info = atts.as_ref().and_then(crate::provenance::parse);
-    let provenance = crate::provenance::verify(info.as_ref(), artifact.claimed_repo.as_deref());
-    artifact.provenance_repo = info.and_then(|i| i.source_repo);
+    artifact.provenance_repo = atts
+        .as_ref()
+        .and_then(crate::provenance::parse)
+        .and_then(|i| i.source_repo);
+    let provenance = match atts {
+        None => Provenance::Absent,
+        Some(atts) => match crate::provenance::sigstore::verify_attestations(
+            &atts,
+            policy,
+            artifact.claimed_repo.as_deref(),
+        ) {
+            crate::provenance::sigstore::Outcome::Verified(id) => Provenance::Verified {
+                workflow: id.workflow,
+                repo: id.repo,
+            },
+            crate::provenance::sigstore::Outcome::Invalid(reason) => Provenance::Invalid { reason },
+        },
+    };
     artifact.provenance_verified = provenance.is_verified();
 
     Ok((artifact, provenance))
@@ -106,11 +131,17 @@ mod tests {
     use crate::testutil::stealer_registry;
     use embargo_core::types::SignalType;
 
+    fn no_policy() -> ProvenancePolicy {
+        ProvenancePolicy::default()
+    }
+
     #[tokio::test]
     async fn build_artifact_layers_metadata() {
         let client = stealer_registry();
         let p = client.packument.clone();
-        let (art, prov) = build_artifact(&client, &p, "demo", "1.1.0").await.unwrap();
+        let (art, prov) = build_artifact(&client, &no_policy(), &p, "demo", "1.1.0")
+            .await
+            .unwrap();
         assert_eq!(
             art.claimed_repo.as_deref(),
             Some("https://github.com/acme/demo")
@@ -129,8 +160,12 @@ mod tests {
         // ignored integration test).
         let client = stealer_registry();
         let p = client.packument.clone();
-        let (current, _) = build_artifact(&client, &p, "demo", "1.1.0").await.unwrap();
-        let (prior, _) = build_artifact(&client, &p, "demo", "1.0.0").await.unwrap();
+        let (current, _) = build_artifact(&client, &no_policy(), &p, "demo", "1.1.0")
+            .await
+            .unwrap();
+        let (prior, _) = build_artifact(&client, &no_policy(), &p, "demo", "1.0.0")
+            .await
+            .unwrap();
 
         let signals = extract_signals(&current, Some(&prior));
         assert!(

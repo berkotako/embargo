@@ -46,6 +46,25 @@ pub enum HoldReason {
     ApprovedException { approver: String, reason: String },
 }
 
+impl HoldReason {
+    /// Hard external blocks a time-boxed exception must NOT release.
+    ///
+    /// The exception workflow exists to let a human release a *cooldown*,
+    /// *provenance*, or *behavioral-signal* HOLD/DENY after review. It must never
+    /// silently un-block an external "this is malicious" fact: an advisory/CVE
+    /// match, a known-malicious feed listing, or an explicit operator denial.
+    /// Allowing that would regress the core invariant (CLAUDE.md): a
+    /// known-malicious version is never served, even on an active approval.
+    pub fn is_hard_block(&self) -> bool {
+        matches!(
+            self,
+            HoldReason::Advisory { .. }
+                | HoldReason::KnownMalicious { .. }
+                | HoldReason::ManualDeny { .. }
+        )
+    }
+}
+
 /// Severity of a signal finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -125,6 +144,40 @@ pub struct VersionVerdict {
     pub computed_at: DateTime<Utc>,
     /// When None, the verdict does not expire (ALLOW/DENY). When Some, re-evaluate at this time.
     pub expires_at: Option<DateTime<Utc>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hard_blocks_are_not_exception_releasable() {
+        assert!(HoldReason::Advisory {
+            advisory_id: "GHSA-x".into()
+        }
+        .is_hard_block());
+        assert!(HoldReason::KnownMalicious {
+            source: "datadog".into()
+        }
+        .is_hard_block());
+        assert!(HoldReason::ManualDeny {
+            approver: "a".into(),
+            reason: "r".into()
+        }
+        .is_hard_block());
+    }
+
+    #[test]
+    fn soft_holds_are_exception_releasable() {
+        assert!(!HoldReason::Cooldown { remaining_hours: 5 }.is_hard_block());
+        assert!(!HoldReason::ProvenancePending.is_hard_block());
+        assert!(!HoldReason::ProvenanceMissing.is_hard_block());
+        assert!(!HoldReason::SignalChain {
+            chain_id: "composite".into(),
+            score: 80
+        }
+        .is_hard_block());
+    }
 }
 
 impl VersionVerdict {

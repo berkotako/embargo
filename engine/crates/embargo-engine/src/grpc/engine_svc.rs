@@ -167,9 +167,12 @@ async fn resolve_one(
         .resolve(package)
         .ok_or_else(|| anyhow::anyhow!("no policy rule matched {}", package))?;
     let fast_tracked = resolver.is_fast_tracked(package);
+    // Fail safe on a missing/unparseable publish time: treat it as just-published
+    // so the version HOLDs for the full cooldown rather than slipping through as
+    // "aged". A stripped `time` entry must never bypass cooldown.
     let pub_at = published_at
         .and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32))
-        .unwrap_or_else(|| Utc::now() - chrono::Duration::hours(rule.cooldown_hours as i64 + 1));
+        .unwrap_or_else(Utc::now);
 
     // Signals and provenance are produced out-of-band by the extractor.
     let mut signals = db::signals::get_for_version(&state.pool, package, version).await?;
@@ -196,7 +199,13 @@ async fn resolve_one(
     // 3b. Exception workflow: an active, unexpired approval for this exact
     // (package, version) overrides a HOLD/DENY to ALLOW. Approvals are
     // human-granted, time-boxed, and audited (see admin_svc::create_approval).
-    if verdict.verdict != Verdict::Allow {
+    //
+    // Hard external blocks are NOT releasable this way: an advisory/CVE match, a
+    // known-malicious feed listing, or an explicit manual denial stays DENY even
+    // with an active approval. The exception workflow may only release cooldown,
+    // provenance, and behavioral-signal holds — never an external malicious fact.
+    let hard_blocked = verdict.reasons.iter().any(|r| r.is_hard_block());
+    if verdict.verdict != Verdict::Allow && !hard_blocked {
         if let Some(approval) = db::approvals::get_active(&state.pool, package, version).await? {
             verdict.verdict = Verdict::Allow;
             verdict.reasons.push(HoldReason::ApprovedException {
@@ -534,6 +543,64 @@ rules:
             res.verdict,
             ProtoVerdict::Allow as i32,
             "approval must override to ALLOW"
+        );
+    }
+
+    /// An active approval releases a cooldown HOLD (the intended exception
+    /// workflow) but must NOT release a known-malicious feed DENY — a hard
+    /// external block stays DENY even with an approval covering the same version.
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn approval_cannot_release_known_malicious() {
+        let state = test_state().await;
+        let pkg = unique("km-approved");
+        let ver = "1.0.0";
+        let source = format!("itest-{pkg}");
+        crate::db::known_malicious::replace_source(
+            &state.pool,
+            &source,
+            "npm",
+            &[(pkg.clone(), ver.to_string())],
+        )
+        .await
+        .unwrap();
+
+        // Grant a time-boxed approval for the exact version a responder might use
+        // to try to force it through.
+        crate::db::approvals::create(
+            &state.pool,
+            &pkg,
+            ver,
+            Uuid::nil(),
+            Uuid::nil(),
+            "itest exception",
+            24,
+        )
+        .await
+        .unwrap();
+
+        let r = resolve_one(&state, &pkg, ver, ts_hours_ago(500))
+            .await
+            .unwrap();
+        assert_eq!(
+            r.verdict,
+            ProtoVerdict::Deny as i32,
+            "approval must not release a known-malicious DENY"
+        );
+    }
+
+    /// A version with no publish timestamp must HOLD for cooldown (fail safe),
+    /// not slip through as "aged".
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL + Redis"]
+    async fn missing_publish_time_holds_for_cooldown() {
+        let state = test_state().await;
+        let pkg = unique("notime");
+        let res = resolve_one(&state, &pkg, "1.0.0", None).await.unwrap();
+        assert_eq!(
+            res.verdict,
+            ProtoVerdict::Hold as i32,
+            "missing publish time must HOLD, never bypass cooldown"
         );
     }
 

@@ -14,10 +14,13 @@ All notable changes to Embargo are documented here. This project adheres to
 - **Watchlist + continuous tracking** — a persistent Postgres watchlist of
   packages/scopes and a background worker that re-evaluates each enabled target
   on a configurable interval (or off). Admin API under `/api/watchlist`.
-- **Known-malicious feed** (opt-in) — sync a curated malware dataset (default
-  Datadog's npm manifest, Apache-2.0 — see `NOTICE`) into the engine; a match is
-  an immediate DENY, un-bypassable by fast-track. New console **Known Packages**
-  screen and `/api/known-malicious` API (view/search, manual block, sync).
+- **Known-malicious feeds** — runtime-managed feed sources (`/api/feeds` +
+  console **Known Packages**): add a curated dataset URL, toggle it on, and it
+  syncs into the engine where any npm match is an immediate DENY (un-bypassable
+  by fast-track). Seeded (disabled) with Datadog's npm + PyPI manifests
+  (Apache-2.0 — see `NOTICE`). An **ecosystem** dimension keeps PyPI entries from
+  ever matching an npm resolve (stored for visibility/counts only). Also: manual
+  blocks, search, and per-source/ecosystem counts.
 
 ### Fixed
 

@@ -209,22 +209,24 @@ Two background capabilities run inside the engine (no extra services):
   proactively (cooldown, signals, advisories, typosquatting) rather than only on
   first client resolve. Per-entry `enabled` + `interval_seconds` control cadence.
 
-- **Known-malicious feed** — an **opt-in** sync of a curated malware dataset
-  (default: [Datadog's `malicious-software-packages-dataset`](https://github.com/DataDog/malicious-software-packages-dataset),
-  Apache-2.0 — see [`NOTICE`](NOTICE)) into the engine. Any `package@version` it
-  lists is an immediate **DENY** at resolve time (un-bypassable by fast-track).
-  Disabled by default; enable per environment:
+- **Known-malicious feeds** — runtime-managed feed sources (console → **Known
+  Packages**, or `/api/feeds`). Each source is a curated dataset URL synced into
+  the engine on its interval; any npm `package@version` it lists is an immediate
+  **DENY** at resolve time (un-bypassable by fast-track). Sources carry an
+  **ecosystem** (`npm`/`pypi`) — PyPI entries are stored for visibility/counts
+  only and never affect npm resolves. Two sources are **seeded but disabled**:
+  Datadog's npm and PyPI manifests
+  ([`malicious-software-packages-dataset`](https://github.com/DataDog/malicious-software-packages-dataset),
+  Apache-2.0 — see [`NOTICE`](NOTICE)). Toggle one on in the console (or
+  `PATCH /api/feeds/{id}`) and it syncs ~46k npm entries. Operators can add any
+  manifest-format source, add manual blocks, or **Sync now** — all from the
+  Known Packages screen. Enabling a source adds its URL host to the engine's
+  required outbound list.
 
-  ```bash
-  EMBARGO__KNOWN_MALICIOUS_FEED__ENABLED=true
-  # optional overrides (defaults shown):
-  # EMBARGO__KNOWN_MALICIOUS_FEED__URL=https://raw.githubusercontent.com/DataDog/malicious-software-packages-dataset/main/samples/npm/manifest.json
-  # EMBARGO__KNOWN_MALICIOUS_FEED__INTERVAL_SECS=21600   # 6h
-  ```
-
-  Operators can also add their own blocks and trigger a sync from the console
-  **Known Packages** screen (admin), or via `/api/known-malicious`. Enabling the
-  feed adds the feed URL host to the engine's required outbound list.
+  > **OSSF note:** the [OpenSSF `malicious-packages`](https://github.com/ossf/malicious-packages)
+  > data is published to **OSV.dev**, which Embargo already queries live on every
+  > resolve (`advisory_match`), so OSSF coverage is largely transitive today.
+  > Bulk-import sources are added here when they expose a manifest URL.
 
 ## Onboarding clients
 
